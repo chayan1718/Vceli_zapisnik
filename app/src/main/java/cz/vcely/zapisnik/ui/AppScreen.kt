@@ -70,6 +70,7 @@ fun AppScreen(
     val draft by viewModel.draft.collectAsState()
     val inspections by viewModel.inspections.collectAsState()
     val isListening by viewModel.isListening.collectAsState()
+    val voicePaused by viewModel.voicePaused.collectAsState()
     val partial by viewModel.partialText.collectAsState()
     val tab by viewModel.tab.collectAsState()
     val hiveFilter by viewModel.hiveFilter.collectAsState()
@@ -116,7 +117,7 @@ fun AppScreen(
                 )
             } else {
                 if (isListening || partial.isNotBlank()) {
-                    ListeningBanner(isListening = isListening, partial = partial)
+                    ListeningBanner(isListening = isListening, paused = voicePaused, partial = partial)
                 }
                 TabRow(selectedTabIndex = tab.ordinal) {
                     Tab(
@@ -155,19 +156,29 @@ fun AppScreen(
 }
 
 @Composable
-private fun ListeningBanner(isListening: Boolean, partial: String) {
+private fun ListeningBanner(isListening: Boolean, paused: Boolean, partial: String) {
     Spacer(Modifier.height(8.dp))
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp)) {
             Text(
-                if (isListening) "🎙️ Poslouchám… mluvte" else "Zpracovávám…",
+                when {
+                    paused -> "\u23F8\uFE0F Pozastaveno \u2013 řekněte „api diktuji“ pro pokračování"
+                    isListening -> "\uD83C\uDF99\uFE0F Poslouchám… mluvte"
+                    else -> "Zpracovávám…"
+                },
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary
+                color = if (paused) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
             )
-            if (partial.isNotBlank()) {
+            if (!paused && partial.isNotBlank()) {
                 Spacer(Modifier.height(4.dp))
                 Text(partial, style = MaterialTheme.typography.bodyMedium)
             }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Hlasové ovládání: „api pauza“ · „api diktuji“ · „api stop“",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline
+            )
         }
     }
     Spacer(Modifier.height(8.dp))

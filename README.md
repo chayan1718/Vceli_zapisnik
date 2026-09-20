@@ -27,6 +27,20 @@ Než se záznam uloží, uvidíte **náhled** a můžete cokoli opravit.
   slyší (živý náhled textu), a klepnutím na **Zastavit** diktování ukončíte.
   Není potřeba systémové okno. Když souvislé rozpoznávání na telefonu není,
   appka se automaticky vrátí ke klasickému oknu pro diktování.
+- **Hlasové ovládání diktátu** – když máte ruce u úlu, nemusíte sahat na
+  telefon. Řekněte jako samostatnou větu (s aktivačním slovem **„api"**):
+    - **„api pauza"** (nebo „přestaň", „počkej", „pozastav") – dočasně
+      přestane zapisovat, co říkáte; mikrofon dál poslouchá, jen čeká na
+      další příkaz.
+    - **„api diktuji"** (nebo „pokračuj", „start", „zapni") – pokračuje
+      v zápisu tam, kde přestal.
+    - **„api stop"** (nebo „konec", „ukončit", „hotovo") – diktát úplně
+      ukončí, stejně jako klepnutí na **Zastavit**.
+
+  Appka na příkaz krátce odpoví hlasem („Diktuji" / „Pauza" / „Stop") a
+  jemně vibruje, takže poznáte, že příkaz zaregistrovala, i bez pohledu na
+  displej. Na obrazovce se navíc vždy zobrazuje aktuální stav a nápověda
+  k příkazům.
 - **Fotka a poloha u záznamu** – k prohlídce můžete připojit **fotku** (např.
   plástu) a automaticky se doplní **GPS souřadnice** stanoviště (pokud povolíte
   polohu). Obojí se ukládá i do CSV.
@@ -176,7 +190,9 @@ app/src/main/java/cz/vcely/zapisnik/
 │  ├─ Draft.kt                – rozpracovaný záznam (text → Inspection)
 │  ├─ InspectionParser.kt     – offline český parser (jádro appky)
 │  └─ LlmParser.kt            – volitelný rozbor přes AI
-├─ speech/SpeechRecognizerManager.kt – souvislý diktát s živým náhledem
+├─ speech/
+│  ├─ SpeechRecognizerManager.kt – souvislý diktát s živým náhledem a hlasovými příkazy
+│  └─ VoiceFeedback.kt        – hlasová odezva (TTS) na příkazy "api pauza/diktuji/stop"
 ├─ location/LocationHelper.kt        – odečet GPS polohy
 ├─ export/CsvExporter.kt      – export do CSV
 └─ ui/                        – Compose obrazovky (Záznamy, Přehled), ViewModel

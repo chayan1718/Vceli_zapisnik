@@ -1,10 +1,15 @@
 package cz.vcely.zapisnik
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.speech.RecognizerIntent
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -15,6 +20,7 @@ import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import cz.vcely.zapisnik.speech.SpeechRecognizerManager
+import cz.vcely.zapisnik.speech.VoiceCommand
 import cz.vcely.zapisnik.ui.AppScreen
 import cz.vcely.zapisnik.ui.InspectionViewModel
 import cz.vcely.zapisnik.ui.VceliTheme
@@ -52,6 +58,11 @@ class MainActivity : ComponentActivity() {
                 viewModel.setListening(false)
                 viewModel.setPartial("")
                 if (msg.isNotBlank()) toast(msg)
+            },
+            onCommand = { cmd ->
+                viewModel.onVoiceCommand(cmd)
+                vibrate()
+                if (cmd == VoiceCommand.STOP) viewModel.setListening(false)
             }
         )
 
@@ -175,4 +186,15 @@ class MainActivity : ComponentActivity() {
         ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+
+    // --- Krátká vibrace jako potvrzení hlasového příkazu ("api pauza" / "api diktuji" / "api stop") ---
+    private fun vibrate(ms: Long = 40) {
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        }
+        vibrator?.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE))
+    }
 }

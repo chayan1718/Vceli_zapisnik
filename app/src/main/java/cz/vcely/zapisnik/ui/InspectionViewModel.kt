@@ -11,6 +11,7 @@ import cz.vcely.zapisnik.location.LocationHelper
 import cz.vcely.zapisnik.parser.Draft
 import cz.vcely.zapisnik.parser.InspectionParser
 import cz.vcely.zapisnik.parser.LlmParser
+import cz.vcely.zapisnik.speech.VoiceCommand
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -46,12 +47,25 @@ class InspectionViewModel(app: Application) : AndroidViewModel(app) {
     // --- Souvislý diktát ---
     val isListening = MutableStateFlow(false)
     val partialText = MutableStateFlow("")
+    /** Pozastaveno hlasovým příkazem "api pauza" – mikrofon poslouchá dál, ale nic se nezapisuje. */
+    val voicePaused = MutableStateFlow(false)
 
     // --- Navigace / filtr ---
     val tab = MutableStateFlow(ScreenTab.RECORDS)
     val hiveFilter = MutableStateFlow<Int?>(null)
 
-    fun setListening(value: Boolean) { isListening.value = value }
+    fun setListening(value: Boolean) {
+        isListening.value = value
+        if (value) voicePaused.value = false
+    }
+
+    /** Reaguje na hlasový příkaz z [cz.vcely.zapisnik.speech.SpeechRecognizerManager]. */
+    fun onVoiceCommand(cmd: VoiceCommand) {
+        voicePaused.value = when (cmd) {
+            VoiceCommand.PAUSE -> true
+            VoiceCommand.RESUME, VoiceCommand.STOP -> false
+        }
+    }
     fun setPartial(text: String) { partialText.value = text }
     fun setTab(t: ScreenTab) { tab.value = t }
 
