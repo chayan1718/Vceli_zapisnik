@@ -1,0 +1,4 @@
+<resources>
+    <!-- Základní téma. Vzhled řeší Jetpack Compose (viz ui/Theme.kt). -->
+    <style name="Theme.VceliZapisnik" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
