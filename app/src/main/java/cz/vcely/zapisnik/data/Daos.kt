@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface HiveDao {
-    @Query("SELECT * FROM hives ORDER BY number")
+    @Query("SELECT * FROM hives ORDER BY id")
     fun observeAll(): Flow<List<Hive>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -22,8 +22,8 @@ interface InspectionDao {
     @Query("SELECT * FROM inspections ORDER BY timestamp DESC")
     fun observeAll(): Flow<List<Inspection>>
 
-    @Query("SELECT * FROM inspections WHERE hiveNumber = :hive ORDER BY timestamp DESC")
-    fun observeForHive(hive: Int): Flow<List<Inspection>>
+    @Query("SELECT * FROM inspections WHERE hiveId = :hive ORDER BY timestamp DESC")
+    fun observeForHive(hive: String): Flow<List<Inspection>>
 
     @Insert
     suspend fun insert(inspection: Inspection): Long
@@ -34,6 +34,15 @@ interface InspectionDao {
     @Delete
     suspend fun delete(inspection: Inspection)
 
-    @Query("SELECT * FROM inspections ORDER BY hiveNumber, timestamp")
+    @Query("SELECT * FROM inspections ORDER BY hiveId, timestamp")
     suspend fun getAllForExport(): List<Inspection>
+}
+
+@Dao
+interface StanovisteDao {
+    @Query("SELECT * FROM stanoviste ORDER BY name")
+    fun observeAll(): Flow<List<Stanoviste>>
+
+    @Insert
+    suspend fun insert(stanoviste: Stanoviste): Long
 }

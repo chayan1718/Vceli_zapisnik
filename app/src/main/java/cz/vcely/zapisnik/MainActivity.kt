@@ -49,7 +49,7 @@ class MainActivity : ComponentActivity() {
             onPartial = { viewModel.setPartial(it) },
             onFinal = { text ->
                 if (text.isNotBlank()) {
-                    viewModel.onTranscript(text, viewModel.lastHive.value.toIntOrNull())
+                    viewModel.onTranscript(text, viewModel.lastHive.value.ifBlank { null })
                 } else {
                     viewModel.setListening(false)
                 }
@@ -75,7 +75,7 @@ class MainActivity : ComponentActivity() {
                     ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
                     ?.firstOrNull()
                 if (!text.isNullOrBlank()) {
-                    viewModel.onTranscript(text, viewModel.lastHive.value.toIntOrNull())
+                    viewModel.onTranscript(text, viewModel.lastHive.value.ifBlank { null })
                 }
             }
         }
@@ -130,6 +130,11 @@ class MainActivity : ComponentActivity() {
             speech.stop()
             return
         }
+        // Nejdřív zjistíme/potvrdíme stanoviště podle GPS, teprve pak spustíme mikrofon.
+        viewModel.beginDictation(this) { startMicAfterStanoviste() }
+    }
+
+    private fun startMicAfterStanoviste() {
         if (!SpeechRecognizerManager.isAvailable(this)) {
             launchSpeechIntent()
             return

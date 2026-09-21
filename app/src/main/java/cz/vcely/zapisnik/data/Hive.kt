@@ -3,9 +3,11 @@ package cz.vcely.zapisnik.data
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
-/** Úl (včelstvo). Identifikuje se číslem, které se používá i v diktovaných záznamech. */
+/**
+ * Úl (včelstvo). Identifikuje se buď číslem ("5"), nebo jménem/přezdívkou
+ * ("Jana") – appka rozezná obojí i v diktovaných záznamech.
+ */
 @Entity(tableName = "hives")
 data class Hive(
-    @PrimaryKey val number: Int,   // číslo úlu, např. 5
-    val name: String? = null,      // volitelný název / stanoviště
+    @PrimaryKey val id: String,   // identifikátor úlu, např. "5" nebo "Jana"
 )

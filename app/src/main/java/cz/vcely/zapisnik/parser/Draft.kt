@@ -10,7 +10,9 @@ import cz.vcely.zapisnik.data.Inspection
  * a při uložení se Draft převede na [Inspection].
  */
 data class Draft(
-    var hiveNumber: String = "",
+    var hiveId: String = "",        // číslo úlu ("5") nebo jméno ("Jana")
+    var stanovisteName: String = "",
+    var broodChamberFrames: String = "",
     var cappedBroodFrames: String = "",
     var openBroodFrames: String = "",
     var storesFrames: String = "",
@@ -44,7 +46,9 @@ data class Draft(
         fun t(s: String): String? = s.trim().ifBlank { null }
 
         return Inspection(
-            hiveNumber = i(hiveNumber) ?: 0,
+            hiveId = hiveId.trim(),
+            stanovisteName = t(stanovisteName),
+            broodChamberFrames = d(broodChamberFrames),
             cappedBroodFrames = d(cappedBroodFrames),
             openBroodFrames = d(openBroodFrames),
             storesFrames = d(storesFrames),

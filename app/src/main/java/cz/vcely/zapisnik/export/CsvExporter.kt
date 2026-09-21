@@ -13,14 +13,14 @@ object CsvExporter {
     private val dateFmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale("cs"))
 
     private val headers = listOf(
-        "Datum", "Úl",
-        "Zavíčkovaný plod (rám.)", "Otevřený plod (rám.)", "Zásoby (rám.)",
+        "Datum", "Stanoviště", "Úl",
+        "Plodiště (rám.)", "Zavíčkovaný plod (rám.)", "Otevřený plod (rám.)", "Zásoby (rám.)",
         "Matka nalezena", "Stav matky", "Vajíčka",
         "Obsednuto (uličky)", "Mírnost", "Nemoci", "Spad roztočů",
         "Zásahy", "Krmení", "Léčení",
         "Med (kg)", "Odebrané rámky", "Úkoly do příště",
         "GPS šířka", "GPS délka", "Fotka",
-        "Poznámka", "Přepis řeči"
+        "Poznámka", "Přepis řeči", "Zapsal(a)"
     )
 
     fun write(context: Context, list: List<Inspection>): File {
@@ -35,7 +35,9 @@ object CsvExporter {
         for (r in list) {
             val row = listOf(
                 dateFmt.format(Date(r.timestamp)),
-                r.hiveNumber.toString(),
+                r.stanovisteName.orEmpty(),
+                r.hiveId,
+                num(r.broodChamberFrames),
                 num(r.cappedBroodFrames), num(r.openBroodFrames), num(r.storesFrames),
                 bool(r.queenSeen), r.queenStatus.orEmpty(), bool(r.eggsSeen),
                 num(r.occupiedSeams), r.temperament.orEmpty(), r.diseaseNotes.orEmpty(),
@@ -44,7 +46,7 @@ object CsvExporter {
                 num(r.honeyEstimateKg), num(r.framesRemoved), r.tasksNextTime.orEmpty(),
                 r.latitude?.toString().orEmpty(), r.longitude?.toString().orEmpty(),
                 r.photoPath?.substringAfterLast('/').orEmpty(),
-                r.note.orEmpty(), r.rawTranscript.orEmpty()
+                r.note.orEmpty(), r.rawTranscript.orEmpty(), r.recordedBy.orEmpty()
             )
             sb.append(row.joinToString(";") { csv(it) }).append("\r\n")
         }

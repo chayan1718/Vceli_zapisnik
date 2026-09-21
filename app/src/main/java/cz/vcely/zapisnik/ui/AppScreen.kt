@@ -25,9 +25,11 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
@@ -39,11 +41,14 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
@@ -59,6 +64,11 @@ import java.util.Locale
 
 private val listDateFmt = SimpleDateFormat("d. M. yyyy HH:mm", Locale("cs"))
 
+/** Číselný úl zobrazíme jako "č. 5", pojmenovaný jako "„Jana“". */
+private fun hiveLabel(id: String?): String =
+    if (id.isNullOrBlank()) "?"
+    else if (id.toIntOrNull() != null) "č. $id" else "„$id“"
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppScreen(
@@ -70,15 +80,38 @@ fun AppScreen(
     val draft by viewModel.draft.collectAsState()
     val inspections by viewModel.inspections.collectAsState()
     val isListening by viewModel.isListening.collectAsState()
+    val isPreparingDictation by viewModel.isPreparingDictation.collectAsState()
     val voicePaused by viewModel.voicePaused.collectAsState()
     val partial by viewModel.partialText.collectAsState()
     val tab by viewModel.tab.collectAsState()
     val hiveFilter by viewModel.hiveFilter.collectAsState()
+    val userName by viewModel.userName.collectAsState()
+    val showNamePrompt by viewModel.showNamePrompt.collectAsState()
+    val pendingNewStanoviste by viewModel.pendingNewStanoviste.collectAsState()
+    val currentStanoviste by viewModel.currentStanovisteName.collectAsState()
+
+    if (showNamePrompt) {
+        NamePromptDialog(onConfirm = { viewModel.setUserName(it) })
+    }
+    if (pendingNewStanoviste != null) {
+        NewStanovisteDialog(
+            hasLocation = pendingNewStanoviste?.latitude != null,
+            onConfirm = { name -> viewModel.confirmNewStanoviste(name) },
+            onCancel = { viewModel.cancelNewStanoviste() }
+        )
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Včelí zápisník") },
+                title = {
+                    Column {
+                        Text("Včelí zápisník")
+                        if (userName.isNotBlank()) {
+                            Text(userName, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                },
                 actions = {
                     IconButton(onClick = onExport) {
                         Icon(Icons.Filled.Download, contentDescription = "Export CSV")
@@ -89,13 +122,34 @@ fun AppScreen(
         floatingActionButton = {
             if (draft == null) {
                 ExtendedFloatingActionButton(
-                    text = { Text(if (isListening) "Zastavit" else "Diktovat") },
-                    icon = {
-                        Icon(if (isListening) Icons.Filled.Stop else Icons.Filled.Mic, contentDescription = null)
+                    text = {
+                        Text(
+                            when {
+                                isListening -> "Zastavit"
+                                isPreparingDictation -> "Zjišťuji polohu…"
+                                else -> "Diktovat"
+                            }
+                        )
                     },
+                    icon = {
+                        if (isPreparingDictation && !isListening) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        } else {
+                            Icon(if (isListening) Icons.Filled.Stop else Icons.Filled.Mic, contentDescription = null)
+                        }
+                    },
+                    // I bez GPS zpoždění appka na klik reaguje ihned (viz isPreparingDictation) –
+                    // druhý klik během zjišťování polohy se ignoruje v MainActivity.toggleMic().
                     onClick = onToggleMic,
-                    containerColor = if (isListening) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.primary
+                    containerColor = when {
+                        isListening -> MaterialTheme.colorScheme.error
+                        isPreparingDictation -> MaterialTheme.colorScheme.secondary
+                        else -> MaterialTheme.colorScheme.primary
+                    }
                 )
             }
         }
@@ -117,7 +171,12 @@ fun AppScreen(
                 )
             } else {
                 if (isListening || partial.isNotBlank()) {
-                    ListeningBanner(isListening = isListening, paused = voicePaused, partial = partial)
+                    ListeningBanner(
+                        isListening = isListening,
+                        paused = voicePaused,
+                        partial = partial,
+                        stanoviste = currentStanoviste
+                    )
                 }
                 TabRow(selectedTabIndex = tab.ordinal) {
                     Tab(
@@ -137,11 +196,11 @@ fun AppScreen(
                         if (hiveFilter != null) {
                             AssistChip(
                                 onClick = { viewModel.clearHiveFilter() },
-                                label = { Text("Úl č. $hiveFilter  ✕") }
+                                label = { Text("Úl ${hiveLabel(hiveFilter)}  ✕") }
                             )
                             Spacer(Modifier.height(8.dp))
                         }
-                        val list = hiveFilter?.let { h -> inspections.filter { it.hiveNumber == h } }
+                        val list = hiveFilter?.let { h -> inspections.filter { it.hiveId == h } }
                             ?: inspections
                         InspectionList(list, onDelete = { viewModel.deleteInspection(it) })
                     }
@@ -156,7 +215,7 @@ fun AppScreen(
 }
 
 @Composable
-private fun ListeningBanner(isListening: Boolean, paused: Boolean, partial: String) {
+private fun ListeningBanner(isListening: Boolean, paused: Boolean, partial: String, stanoviste: String?) {
     Spacer(Modifier.height(8.dp))
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp)) {
@@ -169,6 +228,14 @@ private fun ListeningBanner(isListening: Boolean, paused: Boolean, partial: Stri
                 style = MaterialTheme.typography.labelMedium,
                 color = if (paused) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
             )
+            if (!stanoviste.isNullOrBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "📍 Stanoviště: $stanoviste",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline
+                )
+            }
             if (!paused && partial.isNotBlank()) {
                 Spacer(Modifier.height(4.dp))
                 Text(partial, style = MaterialTheme.typography.bodyMedium)
@@ -182,6 +249,71 @@ private fun ListeningBanner(isListening: Boolean, paused: Boolean, partial: Stri
         }
     }
     Spacer(Modifier.height(8.dp))
+}
+
+// ---------------------------------------------------------------------------
+// Dialogy: jméno uživatele, nové stanoviště
+// ---------------------------------------------------------------------------
+@Composable
+private fun NamePromptDialog(onConfirm: (String) -> Unit) {
+    var text by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = { /* nelze zavřít bez zadání jména */ },
+        title = { Text("Jak se jmenujete?") },
+        text = {
+            Column {
+                Text(
+                    "Vaše jméno nebo přezdívka se uloží k záznamům (např. do exportu CSV).",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text("Jméno / přezdívka") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(text) }, enabled = text.isNotBlank()) { Text("Uložit") }
+        }
+    )
+}
+
+@Composable
+private fun NewStanovisteDialog(hasLocation: Boolean, onConfirm: (String) -> Unit, onCancel: () -> Unit) {
+    var text by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Nové stanoviště") },
+        text = {
+            Column {
+                Text(
+                    if (hasLocation)
+                        "Tuto polohu appka ještě nezná. Jak se stanoviště jmenuje (např. „Vidlákova Lhota“, „Benešov Vršky“)?"
+                    else
+                        "Polohu se nepodařilo zjistit (chybí GPS signál nebo oprávnění). Zadejte název stanoviště ručně.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text("Název stanoviště") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(text) }, enabled = text.isNotBlank()) { Text("Uložit") }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("Zrušit") }
+        }
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -200,7 +332,8 @@ private fun InspectionList(inspections: List<Inspection>, onDelete: (Inspection)
             Text(
                 "Klepněte na „Diktovat“ a řekněte např.:\n" +
                     "„úl číslo pět, zavíčkovaný plod na dvou rámcích, " +
-                    "zásoby tři rámky, matka nalezena v pořádku“.",
+                    "zásoby tři rámky, matka nalezena v pořádku“.\n" +
+                    "Úl jde pojmenovat i jménem, např. „úl Jana“.",
                 style = MaterialTheme.typography.bodyMedium
             )
         }
@@ -223,7 +356,7 @@ private fun InspectionCard(r: Inspection, onDelete: () -> Unit) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "Úl č. ${r.hiveNumber}",
+                        "Úl ${hiveLabel(r.hiveId)}",
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.weight(1f)
                     )
@@ -237,10 +370,17 @@ private fun InspectionCard(r: Inspection, onDelete: () -> Unit) {
                     Spacer(Modifier.height(4.dp))
                     Text(lines.joinToString("  ·  "), style = MaterialTheme.typography.bodyMedium)
                 }
-                if (r.latitude != null && r.longitude != null) {
+                if (!r.stanovisteName.isNullOrBlank() || (r.latitude != null && r.longitude != null)) {
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        "📍 ${r.latitude}, ${r.longitude}",
+                        buildString {
+                            append("📍 ")
+                            if (!r.stanovisteName.isNullOrBlank()) append(r.stanovisteName)
+                            if (r.latitude != null && r.longitude != null) {
+                                if (!r.stanovisteName.isNullOrBlank()) append("  ·  ")
+                                append("${r.latitude}, ${r.longitude}")
+                            }
+                        },
                         style = MaterialTheme.typography.labelSmall
                     )
                 }
@@ -259,6 +399,7 @@ private fun InspectionCard(r: Inspection, onDelete: () -> Unit) {
 }
 
 private fun summaryLines(r: Inspection): List<String> = buildList {
+    r.broodChamberFrames?.let { add("plodiště ${numFmt(it)}") }
     r.cappedBroodFrames?.let { add("zavíč. plod ${numFmt(it)}") }
     r.openBroodFrames?.let { add("otev. plod ${numFmt(it)}") }
     r.storesFrames?.let { add("zásoby ${numFmt(it)}") }
@@ -276,21 +417,21 @@ private fun summaryLines(r: Inspection): List<String> = buildList {
 // Záložka Přehled úlů
 // ---------------------------------------------------------------------------
 private fun buildOverview(list: List<Inspection>): List<HiveSummary> =
-    list.groupBy { it.hiveNumber }
+    list.groupBy { it.hiveId }
         .map { (hive, records) ->
             val newest = records.maxByOrNull { it.timestamp }
             HiveSummary(
-                hiveNumber = hive,
+                hiveId = hive,
                 count = records.size,
                 lastTimestamp = newest?.timestamp ?: 0L,
                 lastStores = newest?.storesFrames,
                 lastBrood = newest?.cappedBroodFrames,
             )
         }
-        .sortedBy { it.hiveNumber }
+        .sortedBy { it.hiveId }
 
 @Composable
-private fun OverviewList(summaries: List<HiveSummary>, onHiveClick: (Int) -> Unit) {
+private fun OverviewList(summaries: List<HiveSummary>, onHiveClick: (String) -> Unit) {
     if (summaries.isEmpty()) {
         Column(
             Modifier.fillMaxSize(),
@@ -301,14 +442,14 @@ private fun OverviewList(summaries: List<HiveSummary>, onHiveClick: (Int) -> Uni
         }
     } else {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(summaries, key = { it.hiveNumber }) { s ->
+            items(summaries, key = { it.hiveId }) { s ->
                 Card(
                     Modifier
                         .fillMaxWidth()
-                        .clickable { onHiveClick(s.hiveNumber) }
+                        .clickable { onHiveClick(s.hiveId) }
                 ) {
                     Column(Modifier.padding(12.dp)) {
-                        Text("Úl č. ${s.hiveNumber}", style = MaterialTheme.typography.titleMedium)
+                        Text("Úl ${hiveLabel(s.hiveId)}", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(4.dp))
                         val detail = buildList {
                             add("${s.count} záznamů")
@@ -345,9 +486,11 @@ private fun DraftForm(
         )
         Spacer(Modifier.height(8.dp))
 
-        field("Úl č.", draft.hiveNumber) { v -> onChange { it.copy(hiveNumber = v) } }
+        field("Úl (číslo nebo jméno)", draft.hiveId) { v -> onChange { it.copy(hiveId = v) } }
+        field("Stanoviště", draft.stanovisteName) { v -> onChange { it.copy(stanovisteName = v) } }
 
         section("Základ")
+        field("Počet rámků v plodišti", draft.broodChamberFrames) { v -> onChange { it.copy(broodChamberFrames = v) } }
         field("Zavíčkovaný plod (rámky)", draft.cappedBroodFrames) { v -> onChange { it.copy(cappedBroodFrames = v) } }
         field("Otevřený plod (rámky)", draft.openBroodFrames) { v -> onChange { it.copy(openBroodFrames = v) } }
         field("Zásoby (rámky)", draft.storesFrames) { v -> onChange { it.copy(storesFrames = v) } }
