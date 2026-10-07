@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 
 @Database(
     entities = [Hive::class, Inspection::class, Stanoviste::class],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -26,8 +26,8 @@ abstract class AppDatabase : RoomDatabase() {
                     "vceli_zapisnik.db"
                 )
                     // Appka zatím nemá psané migrace, takže při zvýšení verze
-                    // schématu (naposledy: souřadnice stanoviště jsou nepovinné,
-                    // verze 3 -> 4) se lokální databáze bezpečně (ale nevratně)
+                    // schématu (naposledy: hlídání motýlice u stanoviště,
+                    // verze 4 -> 5) se lokální databáze bezpečně (ale nevratně)
                     // přetvoří od nuly.
                     .fallbackToDestructiveMigration()
                     .build().also { INSTANCE = it }

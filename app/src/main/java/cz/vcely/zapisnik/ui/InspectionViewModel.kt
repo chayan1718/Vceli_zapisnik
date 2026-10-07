@@ -15,6 +15,8 @@ import cz.vcely.zapisnik.parser.Draft
 import cz.vcely.zapisnik.parser.InspectionParser
 import cz.vcely.zapisnik.parser.LlmParser
 import cz.vcely.zapisnik.speech.VoiceCommand
+import cz.vcely.zapisnik.weather.MotyliceWorker
+import cz.vcely.zapisnik.weather.WeatherHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -25,7 +27,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 
-enum class ScreenTab { RECORDS, OVERVIEW }
+enum class ScreenTab { RECORDS, OVERVIEW, MOTYLICE }
 
 /** Čeká na zadání názvu nového stanoviště – appka nenašla shodu v okruhu 300 m. */
 data class PendingStanoviste(val latitude: Double?, val longitude: Double?)
@@ -72,6 +74,61 @@ class InspectionViewModel(app: Application) : AndroidViewModel(app) {
         UserPrefs.setName(getApplication(), trimmed)
         userName.value = trimmed
         showNamePrompt.value = false
+    }
+
+    // --- Hlídání motýlice (SMS upozornění na síření rámků) ---
+    /** Telefonní číslo pro SMS upozornění, společné pro celou appku. Prázdné, dokud ho uživatel nenastaví. */
+    val alertPhone = MutableStateFlow(UserPrefs.getAlertPhone(app).orEmpty())
+
+    fun setAlertPhone(phone: String) {
+        val trimmed = phone.trim()
+        UserPrefs.setAlertPhone(getApplication(), trimmed)
+        alertPhone.value = trimmed
+    }
+
+    /** Zapne/vypne hlídání motýlice pro dané stanoviště. */
+    fun toggleMotyliceMonitoring(s: Stanoviste) {
+        viewModelScope.launch {
+            db.stanovisteDao().update(s.copy(motyliceMonitoring = !s.motyliceMonitoring))
+        }
+        // Při zapnutí rovnou natáhneme teploty, ať je uživatel hned vidí.
+        if (!s.motyliceMonitoring && s.latitude != null && s.longitude != null) {
+            loadMotyliceTemps(s)
+        }
+    }
+
+    /** Maximální denní teploty (datum, °C) za posledních 7 dní, podle id stanoviště. */
+    val motyliceTemps = MutableStateFlow<Map<Long, List<Pair<String, Double>>>>(emptyMap())
+    /** Id stanovišť, pro která právě probíhá stahování teplot. */
+    val motyliceLoading = MutableStateFlow<Set<Long>>(emptySet())
+
+    /** Stáhne (znovu) max. denní teploty pro dané stanoviště – viz [WeatherHelper]. */
+    fun loadMotyliceTemps(s: Stanoviste) {
+        val lat = s.latitude ?: return
+        val lon = s.longitude ?: return
+        if (motyliceLoading.value.contains(s.id)) return
+        motyliceLoading.value = motyliceLoading.value + s.id
+        viewModelScope.launch {
+            val temps = withContext(Dispatchers.IO) {
+                WeatherHelper.fetchDailyMaxTemps(lat, lon, MotyliceWorker.WINDOW_DAYS)
+            }
+            motyliceTemps.value = motyliceTemps.value + (s.id to (temps ?: emptyList()))
+            motyliceLoading.value = motyliceLoading.value - s.id
+        }
+    }
+
+    /**
+     * Uživatel potvrdil, že rámky na stanovišti právě rozšířil ("síření").
+     * Appka si zapamatuje čas a od teď zase může poslat další upozornění,
+     * až zase nastane podmínka (teplé dny), bez ohledu na to, že už jednou
+     * v tomto "kole" upozornila.
+     */
+    fun confirmSireni(s: Stanoviste) {
+        viewModelScope.launch {
+            db.stanovisteDao().update(
+                s.copy(lastSireniAt = System.currentTimeMillis(), alertAlreadySent = false)
+            )
+        }
     }
 
     // --- Stanoviště (GPS rozpoznání místa) ---

@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Hlídání motýlice: SMS upozornění, že je vhodné rámky rozšířit. -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
 
     <!-- Fotoaparát a poloha nejsou povinné (appka jde použít i bez nich). -->
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />

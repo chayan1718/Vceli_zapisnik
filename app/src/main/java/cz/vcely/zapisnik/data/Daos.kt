@@ -43,6 +43,12 @@ interface StanovisteDao {
     @Query("SELECT * FROM stanoviste ORDER BY name")
     fun observeAll(): Flow<List<Stanoviste>>
 
+    @Query("SELECT * FROM stanoviste WHERE motyliceMonitoring = 1")
+    suspend fun getMonitored(): List<Stanoviste>
+
     @Insert
     suspend fun insert(stanoviste: Stanoviste): Long
+
+    @Update
+    suspend fun update(stanoviste: Stanoviste)
 }

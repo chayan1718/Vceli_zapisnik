@@ -19,11 +19,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -38,12 +40,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,6 +61,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import cz.vcely.zapisnik.data.Inspection
+import cz.vcely.zapisnik.data.Stanoviste
 import cz.vcely.zapisnik.parser.Draft
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -89,6 +94,11 @@ fun AppScreen(
     val showNamePrompt by viewModel.showNamePrompt.collectAsState()
     val pendingNewStanoviste by viewModel.pendingNewStanoviste.collectAsState()
     val currentStanoviste by viewModel.currentStanovisteName.collectAsState()
+    val stanovisteList by viewModel.stanoviste.collectAsState()
+    val alertPhone by viewModel.alertPhone.collectAsState()
+    val motyliceTemps by viewModel.motyliceTemps.collectAsState()
+    val motyliceLoading by viewModel.motyliceLoading.collectAsState()
+    var showPhoneDialog by remember { mutableStateOf(false) }
 
     if (showNamePrompt) {
         NamePromptDialog(onConfirm = { viewModel.setUserName(it) })
@@ -98,6 +108,13 @@ fun AppScreen(
             hasLocation = pendingNewStanoviste?.latitude != null,
             onConfirm = { name -> viewModel.confirmNewStanoviste(name) },
             onCancel = { viewModel.cancelNewStanoviste() }
+        )
+    }
+    if (showPhoneDialog) {
+        AlertPhoneDialog(
+            current = alertPhone,
+            onConfirm = { phone -> viewModel.setAlertPhone(phone); showPhoneDialog = false },
+            onCancel = { showPhoneDialog = false }
         )
     }
 
@@ -113,6 +130,9 @@ fun AppScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showPhoneDialog = true }) {
+                        Icon(Icons.Filled.Phone, contentDescription = "Telefon pro SMS upozornění")
+                    }
                     IconButton(onClick = onExport) {
                         Icon(Icons.Filled.Download, contentDescription = "Export CSV")
                     }
@@ -189,6 +209,11 @@ fun AppScreen(
                         onClick = { viewModel.setTab(ScreenTab.OVERVIEW) },
                         text = { Text("Přehled úlů") }
                     )
+                    Tab(
+                        selected = tab == ScreenTab.MOTYLICE,
+                        onClick = { viewModel.setTab(ScreenTab.MOTYLICE) },
+                        text = { Text("Motýlice") }
+                    )
                 }
                 Spacer(Modifier.height(8.dp))
                 when (tab) {
@@ -205,8 +230,22 @@ fun AppScreen(
                         InspectionList(list, onDelete = { viewModel.deleteInspection(it) })
                     }
                     ScreenTab.OVERVIEW -> {
-                        val overview = remember(inspections) { buildOverview(inspections) }
-                        OverviewList(overview, onHiveClick = { viewModel.showHive(it) })
+                        OverviewByStanovisteScreen(
+                            inspections = inspections,
+                            onHiveClick = { viewModel.showHive(it) }
+                        )
+                    }
+                    ScreenTab.MOTYLICE -> {
+                        MotyliceList(
+                            stanoviste = stanovisteList,
+                            temps = motyliceTemps,
+                            loading = motyliceLoading,
+                            phoneSet = alertPhone.isNotBlank(),
+                            onToggle = { viewModel.toggleMotyliceMonitoring(it) },
+                            onSireni = { viewModel.confirmSireni(it) },
+                            onSetPhone = { showPhoneDialog = true },
+                            onLoadTemps = { viewModel.loadMotyliceTemps(it) }
+                        )
                     }
                 }
             }
@@ -430,6 +469,93 @@ private fun buildOverview(list: List<Inspection>): List<HiveSummary> =
         }
         .sortedBy { it.hiveId }
 
+/** Souhrn jednoho stanoviště pro záložku Přehled – kolik úlů a záznamů k němu patří. */
+private data class StanovisteOverview(
+    val name: String,
+    val hiveCount: Int,
+    val recordCount: Int,
+    val lastTimestamp: Long,
+)
+
+private const val UNKNOWN_STANOVISTE = "Neznámé stanoviště"
+
+private fun buildStanovisteOverview(list: List<Inspection>): List<StanovisteOverview> =
+    list.groupBy { it.stanovisteName?.takeIf { s -> s.isNotBlank() } ?: UNKNOWN_STANOVISTE }
+        .map { (name, records) ->
+            StanovisteOverview(
+                name = name,
+                hiveCount = records.map { it.hiveId }.distinct().size,
+                recordCount = records.size,
+                lastTimestamp = records.maxOfOrNull { it.timestamp } ?: 0L,
+            )
+        }
+        .sortedBy { it.name }
+
+/**
+ * Záložka "Přehled úlů": nejdřív seznam stanovišť, po rozkliknutí stanoviště
+ * seznam úlů, které k němu mají alespoň jeden záznam. Kliknutí na úl pak
+ * (stejně jako dřív) přefiltruje záložku Záznamy na tento úl.
+ */
+@Composable
+private fun OverviewByStanovisteScreen(inspections: List<Inspection>, onHiveClick: (String) -> Unit) {
+    var selectedStanoviste by remember { mutableStateOf<String?>(null) }
+    val sel = selectedStanoviste
+    if (sel == null) {
+        val stanovisteOverview = remember(inspections) { buildStanovisteOverview(inspections) }
+        StanovisteOverviewList(stanovisteOverview, onClick = { selectedStanoviste = it })
+    } else {
+        Column(Modifier.fillMaxSize()) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+                IconButton(onClick = { selectedStanoviste = null }) {
+                    Icon(Icons.Filled.ArrowBack, contentDescription = "Zpět na stanoviště")
+                }
+                Text(sel, style = MaterialTheme.typography.titleMedium)
+            }
+            val hivesHere = remember(inspections, sel) {
+                buildOverview(
+                    inspections.filter { (it.stanovisteName?.takeIf { n -> n.isNotBlank() } ?: UNKNOWN_STANOVISTE) == sel }
+                )
+            }
+            OverviewList(hivesHere, onHiveClick = onHiveClick)
+        }
+    }
+}
+
+@Composable
+private fun StanovisteOverviewList(summaries: List<StanovisteOverview>, onClick: (String) -> Unit) {
+    if (summaries.isEmpty()) {
+        Column(
+            Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text("Zatím žádná stanoviště.", style = MaterialTheme.typography.titleMedium)
+        }
+    } else {
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(summaries, key = { it.name }) { s ->
+                Card(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onClick(s.name) }
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(s.name, style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(4.dp))
+                        val detail = buildList {
+                            add("${s.hiveCount} úlů")
+                            add("${s.recordCount} záznamů")
+                            if (s.lastTimestamp > 0) add("posl. ${listDateFmt.format(Date(s.lastTimestamp))}")
+                        }
+                        Text(detail.joinToString("  ·  "), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+            item { Spacer(Modifier.height(80.dp)) }
+        }
+    }
+}
+
 @Composable
 private fun OverviewList(summaries: List<HiveSummary>, onHiveClick: (String) -> Unit) {
     if (summaries.isEmpty()) {
@@ -595,5 +721,202 @@ private fun field(label: String, value: String, onValueChange: (String) -> Unit)
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 3.dp)
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Záložka Motýlice (hlídání síření rámků proti vosce voskové)
+// ---------------------------------------------------------------------------
+private val sireniDateFmt = SimpleDateFormat("d. M. yyyy", Locale("cs"))
+
+@Composable
+private fun MotyliceList(
+    stanoviste: List<Stanoviste>,
+    temps: Map<Long, List<Pair<String, Double>>>,
+    loading: Set<Long>,
+    phoneSet: Boolean,
+    onToggle: (Stanoviste) -> Unit,
+    onSireni: (Stanoviste) -> Unit,
+    onSetPhone: () -> Unit,
+    onLoadTemps: (Stanoviste) -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        if (!phoneSet) {
+            Card(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                Column(Modifier.padding(12.dp)) {
+                    Text(
+                        "Telefonní číslo pro SMS upozornění ještě není zadané.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(onClick = onSetPhone) { Text("Zadat telefon") }
+                }
+            }
+        }
+        if (stanoviste.isEmpty()) {
+            Column(
+                Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text("Zatím žádná stanoviště.", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Stanoviště se vytvoří automaticky při prvním diktátu na novém místě.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(stanoviste, key = { it.id }) { s ->
+                    MotyliceCard(
+                        s = s,
+                        temps = temps[s.id],
+                        loading = loading.contains(s.id),
+                        onToggle = { onToggle(s) },
+                        onSireni = { onSireni(s) },
+                        onLoadTemps = { onLoadTemps(s) }
+                    )
+                }
+                item { Spacer(Modifier.height(80.dp)) }
+            }
+        }
+    }
+}
+
+/** "2026-10-07" -> "7. 10." (pokud se nepovede naparsovat, vrátí vstup beze změny). */
+private fun shortDate(iso: String): String {
+    val parts = iso.split("-")
+    return if (parts.size == 3) "${parts[2].toInt()}. ${parts[1].toInt()}." else iso
+}
+
+@Composable
+private fun MotyliceCard(
+    s: Stanoviste,
+    temps: List<Pair<String, Double>>?,
+    loading: Boolean,
+    onToggle: () -> Unit,
+    onSireni: () -> Unit,
+    onLoadTemps: () -> Unit,
+) {
+    val hasLocation = s.latitude != null && s.longitude != null
+
+    // Dokud je hlídání zapnuté a máme polohu, teploty si natáhneme (jen jednou,
+    // dokud je nemáme a zrovna se nestahují – viewModel sám hlídá duplicitní volání).
+    LaunchedEffect(s.id, s.motyliceMonitoring, hasLocation) {
+        if (s.motyliceMonitoring && hasLocation) onLoadTemps()
+    }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(s.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Switch(
+                    checked = s.motyliceMonitoring,
+                    onCheckedChange = { onToggle() },
+                    enabled = hasLocation
+                )
+            }
+            if (!hasLocation) {
+                Text(
+                    "Chybí GPS souřadnice – hlídání nelze zapnout.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            } else if (s.motyliceMonitoring) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    if (s.lastSireniAt != null)
+                        "Poslední síření: ${sireniDateFmt.format(Date(s.lastSireniAt))}"
+                    else
+                        "Síření ještě nebylo zaznamenáno.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = onSireni) { Text("Síření provedeno") }
+
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Max. teploty – stanoviště „${s.name}“",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+                Spacer(Modifier.height(4.dp))
+                when {
+                    loading && temps == null -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Stahuji teploty…", style = MaterialTheme.typography.bodySmall)
+                    }
+                    temps == null -> Text("Teploty se zatím nenačetly.", style = MaterialTheme.typography.bodySmall)
+                    temps.isEmpty() -> Text(
+                        "Data o počasí se nepodařilo stáhnout (appka je možná offline).",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    else -> {
+                        val now = System.currentTimeMillis()
+                        val daysSinceSireni = s.lastSireniAt?.let {
+                            ((now - it) / (24L * 60 * 60 * 1000)).toInt() + 1
+                        }
+                        val windowDays = (daysSinceSireni ?: 7).coerceIn(1, 7)
+                        val recent = temps.takeLast(windowDays)
+                        val hotDays = recent.count { it.second > 10.0 }
+                        Text(
+                            "$hotDays z ${recent.size} dní " +
+                                (if (s.lastSireniAt != null) "od posledního síření" else "za posledních 7 dní") +
+                                " nad 10 °C",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (hotDays >= 4) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        recent.forEach { (date, t) ->
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    shortDate(date),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    "${numFmt(t)} °C",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (t > 10.0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AlertPhoneDialog(current: String, onConfirm: (String) -> Unit, onCancel: () -> Unit) {
+    var text by remember { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Telefon pro SMS upozornění") },
+        text = {
+            Column {
+                Text(
+                    "Na toto číslo appka pošle SMS, když u hlídaného stanoviště hrozí nutnost síření rámků proti motýlici.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text("Telefonní číslo") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(text) }) { Text("Uložit") }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("Zrušit") }
+        }
     )
 }

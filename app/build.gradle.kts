@@ -13,8 +13,8 @@ android {
         applicationId = "cz.vcely.zapisnik"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "2.0"
+        versionCode = 4
+        versionName = "2.1"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -54,6 +54,9 @@ dependencies {
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
+
+    // Hlídání motýlice na pozadí (denní kontrola teplot a případná SMS).
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

@@ -12,6 +12,13 @@ import androidx.room.PrimaryKey
  * žádnou polohu (vypnuté GPS, slabý signál), stanoviště se přesto uloží, ale
  * bez souřadnic – aby se omylem nepárovalo s (0, 0) a nekazilo rozpoznávání
  * jiných, skutečně změřených míst.
+ *
+ * [motyliceMonitoring]: hlídání rizika zavíječe voskového (motýlice) u
+ * skladovaných rámků na tomto stanovišti – viz [cz.vcely.zapisnik.weather.MotyliceWorker].
+ * Hlídání je možné jen pro stanoviště se známými souřadnicemi.
+ * [lastSireniAt]: kdy bylo naposledy provedeno "síření" (rozšíření) rámků.
+ * [alertAlreadySent]: appka už pro aktuální období (od posledního síření)
+ * upozornění poslala, ať nebombarduje SMSkou každý den znovu.
  */
 @Entity(tableName = "stanoviste")
 data class Stanoviste(
@@ -20,4 +27,7 @@ data class Stanoviste(
     val latitude: Double?,
     val longitude: Double?,
     val createdAt: Long = System.currentTimeMillis(),
+    val motyliceMonitoring: Boolean = false,
+    val lastSireniAt: Long? = null,
+    val alertAlreadySent: Boolean = false,
 )
