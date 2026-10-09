@@ -18,14 +18,18 @@ import java.text.Normalizer
  */
 object InspectionParser {
 
-    fun parse(transcript: String, defaultHive: Int? = null): Draft {
+    fun parse(transcript: String, defaultHive: String? = null, knownHiveIds: List<String> = emptyList()): Draft {
         val original = transcript.trim()
         val norm = normalize(original)               // malá písmena, bez diakritiky
         val draft = Draft(rawTranscript = original)
 
-        // --- Číslo úlu ---
-        val hive = parseHiveNumber(norm) ?: defaultHive
-        if (hive != null) draft.hiveNumber = hive.toString()
+        // --- Úl (číslo nebo jméno) ---
+        val hive = parseHiveId(original, norm, knownHiveIds) ?: defaultHive
+        if (hive != null) draft.hiveId = hive
+
+        // --- Plodiště (počet rámků v plodišti celkem) ---
+        framesNear(norm, listOf("plodist"))
+            ?.let { draft.broodChamberFrames = fmt(it) }
 
         // --- Plod ---
         framesNear(norm, listOf("zavickovan", "zavickovaneho", "zavickovany", "vickovan"))
@@ -33,7 +37,8 @@ object InspectionParser {
         framesNear(norm, listOf("otevren", "otevreneho", "otevreny", "nezavickovan"))
             ?.let { draft.openBroodFrames = fmt(it) }
         // Samotné "plod na N rámcích" bez upřesnění bereme jako zavíčkovaný.
-        if (draft.cappedBroodFrames.isBlank() && draft.openBroodFrames.isBlank()) {
+        // ("plodiště" obsahuje podřetězec "plod", proto sem nespadá, pokud už bylo rozpoznáno.)
+        if (draft.cappedBroodFrames.isBlank() && draft.openBroodFrames.isBlank() && draft.broodChamberFrames.isBlank()) {
             framesNear(norm, listOf("plod", "plodu"))?.let { draft.cappedBroodFrames = fmt(it) }
         }
 
@@ -143,17 +148,49 @@ object InspectionParser {
     }
 
     // ---------------------------------------------------------------------
-    // Číslo úlu
+    // Úl – číslo, nebo jméno/přezdívka (např. "úl Jana")
     // ---------------------------------------------------------------------
-    private fun parseHiveNumber(norm: String): Int? {
-        // "ul cislo 5", "ul c 5", "ul 5", "ulek 5", "u ulu cislo dvanact"
-        val markers = listOf("ul cislo", "ulek cislo", "ul c", "ulu cislo", "ul", "ulek", "ulku", "ulu", "vcelstvo", "stanoviste")
-        for (m in markers) {
-            val idx = norm.indexOf(m)
-            if (idx >= 0) {
-                val after = norm.substring(idx + m.length, minOf(norm.length, idx + m.length + 20))
-                firstNumberToken(after)?.let { return it.toInt() }
-            }
+    /** Slova hned za "úl(…)", která se přeskočí, než přijde vlastní číslo/jméno. */
+    private val HIVE_FILLER_WORDS = setOf("cislo", "c", "oznaceni", "oznacen")
+
+    /**
+     * Rozpozná identifikátor úlu (číslo nebo jméno) po libovolně skloňovaném
+     * tvaru "úl" ("úl", "úlu", "úlek", "úlku", "úly"…), případně "včelstvo".
+     * Pracuje po celých slovech (ne po znacích), takže se nespletě jako dřív
+     * u "u úlu Jana" – tam se předchozí přístup ustřihl doprostřed slova
+     * "úlu" a jako jméno vzal jen zbylé "u", což pak spadlo zpátky na
+     * poslední použité číslo úlu.
+     */
+    private fun parseHiveId(original: String, norm: String, knownHiveIds: List<String>): String? {
+        data class Tok(val normWord: String, val start: Int, val end: Int)
+
+        val tokens = Regex("\\S+").findAll(original).mapNotNull { m ->
+            val stripped = m.value.trim { !it.isLetterOrDigit() }
+            if (stripped.isEmpty()) null
+            else Tok(normalize(stripped), m.range.first, m.range.last + 1)
+        }.toList()
+
+        val knownByNorm = knownHiveIds.associateBy { normalize(it) }
+
+        for (i in tokens.indices) {
+            val w = tokens[i].normWord
+            val isMarker = (w.startsWith("ul") && w.length <= 6) || w == "vcelstvo"
+            if (!isMarker) continue
+
+            var j = i + 1
+            while (j < tokens.size && tokens[j].normWord in HIVE_FILLER_WORDS) j++
+            if (j >= tokens.size) continue
+            val candidate = tokens[j]
+
+            // Nejdřív zkusíme číslo – to je nejběžnější případ ("úl číslo pět").
+            wordToNumber(candidate.normWord)?.let { return it.toInt().toString() }
+
+            // Odpovídá-li už existujícímu úlu, použijeme přesně jeho id (zachová velká písmena/diakritiku).
+            knownByNorm[candidate.normWord]?.let { return it }
+
+            // Jinak vezmeme slovo z PŮVODNÍHO textu (zachová diakritiku a velká písmena) jako nové jméno úlu.
+            val name = original.substring(candidate.start, candidate.end).trim { !it.isLetter() }
+            if (name.isNotBlank()) return name
         }
         return null
     }

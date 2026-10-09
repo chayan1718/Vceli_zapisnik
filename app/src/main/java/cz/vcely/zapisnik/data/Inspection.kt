@@ -13,10 +13,13 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "inspections")
 data class Inspection(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val hiveNumber: Int,
+    val hiveId: String,                      // identifikátor úlu – číslo ("5") nebo jméno ("Jana")
     val timestamp: Long = System.currentTimeMillis(),
+    val stanovisteName: String? = null,      // rozpoznané/zadané stanoviště
+    val recordedBy: String? = null,          // jméno/přezdívka uživatele, který záznam pořídil
 
     // --- Základ: plod, zásoby, matka ---
+    val broodChamberFrames: Double? = null,  // počet rámků v plodišti (celkem)
     val cappedBroodFrames: Double? = null,   // zavíčkovaný plod (rámky)
     val openBroodFrames: Double? = null,     // otevřený plod (rámky)
     val storesFrames: Double? = null,        // zásoby (rámky)

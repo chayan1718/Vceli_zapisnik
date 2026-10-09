@@ -19,11 +19,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import cz.vcely.zapisnik.speech.SpeechRecognizerManager
 import cz.vcely.zapisnik.speech.VoiceCommand
 import cz.vcely.zapisnik.ui.AppScreen
 import cz.vcely.zapisnik.ui.InspectionViewModel
 import cz.vcely.zapisnik.ui.VceliTheme
+import cz.vcely.zapisnik.weather.MotyliceWorker
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -38,6 +42,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var micPermissionLauncher: ActivityResultLauncher<String>
     private lateinit var locationPermissionLauncher: ActivityResultLauncher<Array<String>>
     private lateinit var cameraLauncher: ActivityResultLauncher<Uri>
+    private lateinit var smsPermissionLauncher: ActivityResultLauncher<String>
 
     private var pendingPhotoFile: File? = null
 
@@ -49,7 +54,7 @@ class MainActivity : ComponentActivity() {
             onPartial = { viewModel.setPartial(it) },
             onFinal = { text ->
                 if (text.isNotBlank()) {
-                    viewModel.onTranscript(text, viewModel.lastHive.value.toIntOrNull())
+                    viewModel.onTranscript(text, viewModel.lastHive.value.ifBlank { null })
                 } else {
                     viewModel.setListening(false)
                 }
@@ -75,7 +80,7 @@ class MainActivity : ComponentActivity() {
                     ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
                     ?.firstOrNull()
                 if (!text.isNullOrBlank()) {
-                    viewModel.onTranscript(text, viewModel.lastHive.value.toIntOrNull())
+                    viewModel.onTranscript(text, viewModel.lastHive.value.ifBlank { null })
                 }
             }
         }
@@ -95,6 +100,27 @@ class MainActivity : ComponentActivity() {
         ) { success ->
             if (success) pendingPhotoFile?.let { viewModel.setPhoto(it.absolutePath) }
             else pendingPhotoFile?.delete()
+        }
+
+        smsPermissionLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { granted ->
+            if (!granted) {
+                toast("Bez SMS oprávnění nebude appka moct upozornit na síření rámků.")
+            }
+        }
+
+        // Hlídání motýlice: naplánujeme denní kontrolu na pozadí (pokud už neběží)
+        // a vyžádáme si oprávnění k odesílání SMS.
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            MotyliceWorker.WORK_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            PeriodicWorkRequestBuilder<MotyliceWorker>(
+                MotyliceWorker.REPEAT_INTERVAL, MotyliceWorker.REPEAT_UNIT
+            ).build()
+        )
+        if (!hasPermission(Manifest.permission.SEND_SMS)) {
+            smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
         }
 
         // O polohu požádáme jednou při startu (nenásilně).
@@ -130,6 +156,11 @@ class MainActivity : ComponentActivity() {
             speech.stop()
             return
         }
+        // Nejdřív zjistíme/potvrdíme stanoviště podle GPS, teprve pak spustíme mikrofon.
+        viewModel.beginDictation(this) { startMicAfterStanoviste() }
+    }
+
+    private fun startMicAfterStanoviste() {
         if (!SpeechRecognizerManager.isAvailable(this)) {
             launchSpeechIntent()
             return

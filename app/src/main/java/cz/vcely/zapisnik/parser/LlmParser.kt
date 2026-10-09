@@ -32,7 +32,7 @@ object LlmParser {
 
     private val SCHEMA_HINT = """
         Vrať POUZE JSON objekt (bez komentářů) s těmito volitelnými klíči:
-        hiveNumber (číslo úlu, celé číslo jako text),
+        hiveId (identifikátor úlu – číslo jako text, např. "5", nebo jméno/přezdívka úlu, např. "Jana"),
         cappedBroodFrames, openBroodFrames, storesFrames, occupiedSeams,
         honeyEstimateKg, framesRemoved (počty jako čísla, půlky povoleny),
         queenSeen ("ano"/"ne"), queenStatus, eggsSeen ("ano"/"ne"),
@@ -44,7 +44,7 @@ object LlmParser {
     fun isEnabled(): Boolean = apiKey.isNotBlank()
 
     /** Vrátí Draft, nebo null při vypnutí / chybě / offline. */
-    suspend fun parse(transcript: String, defaultHive: Int? = null): Draft? {
+    suspend fun parse(transcript: String, defaultHive: String? = null): Draft? {
         if (!isEnabled()) return null
         return try {
             withContext(Dispatchers.IO) {
@@ -89,10 +89,10 @@ object LlmParser {
         return JSONObject(text.substring(start, end + 1))
     }
 
-    private fun fromJson(o: JSONObject, transcript: String, defaultHive: Int?): Draft {
+    private fun fromJson(o: JSONObject, transcript: String, defaultHive: String?): Draft {
         fun s(key: String): String = if (o.has(key) && !o.isNull(key)) o.get(key).toString() else ""
         val draft = Draft(rawTranscript = transcript)
-        draft.hiveNumber = s("hiveNumber").ifBlank { defaultHive?.toString() ?: "" }
+        draft.hiveId = s("hiveId").ifBlank { defaultHive.orEmpty() }
         draft.cappedBroodFrames = s("cappedBroodFrames")
         draft.openBroodFrames = s("openBroodFrames")
         draft.storesFrames = s("storesFrames")
