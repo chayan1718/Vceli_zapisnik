@@ -22,7 +22,7 @@ interface InspectionDao {
     @Query("SELECT * FROM inspections ORDER BY timestamp DESC")
     fun observeAll(): Flow<List<Inspection>>
 
-    @Query("UPDATE inspections SET stanovisteName = :newName WHERE stanovisteName = :oldName")
+    @Query("UPDATE inspections SET stanovisteName = :newName WHERE TRIM(stanovisteName) = TRIM(:oldName) COLLATE NOCASE")
     suspend fun renameStanoviste(oldName: String, newName: String)
 
     @Query("SELECT * FROM inspections WHERE hiveId = :hive ORDER BY timestamp DESC")
@@ -46,7 +46,7 @@ interface StanovisteDao {
     @Query("SELECT * FROM stanoviste ORDER BY name")
     fun observeAll(): Flow<List<Stanoviste>>
 
-    @Query("UPDATE stanoviste SET name = :newName WHERE name = :oldName")
+    @Query("UPDATE stanoviste SET name = :newName WHERE TRIM(name) = TRIM(:oldName) COLLATE NOCASE")
     suspend fun renameByName(oldName: String, newName: String)
 
     @Query("SELECT * FROM stanoviste WHERE motyliceMonitoring = 1")
