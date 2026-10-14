@@ -277,17 +277,39 @@ class InspectionViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setPhoto(path: String) = updateDraft { it.copy(photoPath = path) }
 
-    fun discardDraft() { draft.value = null }
+    fun discardDraft() { draft.value = null; editingInspection.value = null }
+
+    val editingInspection = MutableStateFlow<Inspection?>(null)
+
+    fun startEditing(inspection: Inspection) {
+        editingInspection.value = inspection
+        draft.value = cz.vcely.zapisnik.parser.Draft.fromInspection(inspection)
+    }
 
     fun saveDraft() {
         val d = draft.value ?: return
+        val editing = editingInspection.value
         viewModelScope.launch {
-            val inspection = d.toInspection().copy(recordedBy = userName.value.ifBlank { null })
-            if (inspection.hiveId.isNotBlank()) {
-                db.hiveDao().upsert(Hive(id = inspection.hiveId))
-                lastHive.value = inspection.hiveId
+            if (editing != null) {
+                val updated = d.toInspection().copy(
+                    id = editing.id,
+                    timestamp = editing.timestamp,
+                    recordedBy = editing.recordedBy,
+                )
+                if (updated.hiveId.isNotBlank()) {
+                    db.hiveDao().upsert(Hive(id = updated.hiveId))
+                    lastHive.value = updated.hiveId
+                }
+                db.inspectionDao().update(updated)
+                editingInspection.value = null
+            } else {
+                val inspection = d.toInspection().copy(recordedBy = userName.value.ifBlank { null })
+                if (inspection.hiveId.isNotBlank()) {
+                    db.hiveDao().upsert(Hive(id = inspection.hiveId))
+                    lastHive.value = inspection.hiveId
+                }
+                db.inspectionDao().insert(inspection)
             }
-            db.inspectionDao().insert(inspection)
             draft.value = null
         }
     }

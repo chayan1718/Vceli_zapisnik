@@ -72,4 +72,42 @@ data class Draft(
             rawTranscript = t(rawTranscript),
         )
     }
+
+    companion object {
+        /** Zpětné naplnění Draftu z existujícího záznamu – pro editaci. */
+        fun fromInspection(i: Inspection): Draft {
+            fun s(v: Double?): String = v?.let {
+                if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString()
+            }.orEmpty()
+            fun s(v: Int?): String = v?.toString().orEmpty()
+            fun s(v: Boolean?): String = when (v) { true -> "ano"; false -> "ne"; null -> "" }
+
+            return Draft(
+                hiveId = i.hiveId,
+                stanovisteName = i.stanovisteName.orEmpty(),
+                broodChamberFrames = s(i.broodChamberFrames),
+                cappedBroodFrames = s(i.cappedBroodFrames),
+                openBroodFrames = s(i.openBroodFrames),
+                storesFrames = s(i.storesFrames),
+                queenSeen = s(i.queenSeen),
+                queenStatus = i.queenStatus.orEmpty(),
+                eggsSeen = s(i.eggsSeen),
+                occupiedSeams = s(i.occupiedSeams),
+                temperament = i.temperament.orEmpty(),
+                diseaseNotes = i.diseaseNotes.orEmpty(),
+                miteDrop = s(i.miteDrop),
+                interventions = i.interventions.orEmpty(),
+                feeding = i.feeding.orEmpty(),
+                treatment = i.treatment.orEmpty(),
+                honeyEstimateKg = s(i.honeyEstimateKg),
+                framesRemoved = s(i.framesRemoved),
+                tasksNextTime = i.tasksNextTime.orEmpty(),
+                note = i.note.orEmpty(),
+                photoPath = i.photoPath.orEmpty(),
+                latitude = s(i.latitude),
+                longitude = s(i.longitude),
+                rawTranscript = i.rawTranscript.orEmpty(),
+            )
+        }
+    }
 }

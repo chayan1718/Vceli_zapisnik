@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoCamera
@@ -227,7 +228,7 @@ fun AppScreen(
                         }
                         val list = hiveFilter?.let { h -> inspections.filter { it.hiveId == h } }
                             ?: inspections
-                        InspectionList(list, onDelete = { viewModel.deleteInspection(it) })
+                        InspectionList(list, onDelete = { viewModel.deleteInspection(it) }, onEdit = { viewModel.startEditing(it) })
                     }
                     ScreenTab.OVERVIEW -> {
                         OverviewByStanovisteScreen(
@@ -359,7 +360,7 @@ private fun NewStanovisteDialog(hasLocation: Boolean, onConfirm: (String) -> Uni
 // Záložka Záznamy
 // ---------------------------------------------------------------------------
 @Composable
-private fun InspectionList(inspections: List<Inspection>, onDelete: (Inspection) -> Unit) {
+private fun InspectionList(inspections: List<Inspection>, onDelete: (Inspection) -> Unit, onEdit: (Inspection) -> Unit) {
     if (inspections.isEmpty()) {
         Column(
             Modifier.fillMaxSize(),
@@ -378,14 +379,14 @@ private fun InspectionList(inspections: List<Inspection>, onDelete: (Inspection)
         }
     } else {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(inspections, key = { it.id }) { r -> InspectionCard(r, onDelete = { onDelete(r) }) }
+            items(inspections, key = { it.id }) { r -> InspectionCard(r, onDelete = { onDelete(r) }, onEdit = { onEdit(r) }) }
             item { Spacer(Modifier.height(80.dp)) }
         }
     }
 }
 
 @Composable
-private fun InspectionCard(r: Inspection, onDelete: () -> Unit) {
+private fun InspectionCard(r: Inspection, onDelete: () -> Unit, onEdit: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Row(Modifier.padding(12.dp)) {
             r.photoPath?.takeIf { it.isNotBlank() }?.let {
@@ -400,6 +401,9 @@ private fun InspectionCard(r: Inspection, onDelete: () -> Unit) {
                         modifier = Modifier.weight(1f)
                     )
                     Text(listDateFmt.format(Date(r.timestamp)), style = MaterialTheme.typography.labelSmall)
+                    IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Filled.Edit, contentDescription = "Upravit")
+                    }
                     IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Filled.Delete, contentDescription = "Smazat")
                     }
