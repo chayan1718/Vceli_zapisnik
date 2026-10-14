@@ -27,7 +27,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 
-enum class ScreenTab { RECORDS, OVERVIEW, MOTYLICE }
+enum class ScreenTab { RECORDS, OVERVIEW, MOTYLICE, MONTHLY }
 
 /** Čeká na zadání názvu nového stanoviště – appka nenašla shodu v okruhu 300 m. */
 data class PendingStanoviste(val latitude: Double?, val longitude: Double?)
@@ -316,6 +316,45 @@ class InspectionViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deleteInspection(inspection: Inspection) {
         viewModelScope.launch { db.inspectionDao().delete(inspection) }
+    }
+
+    /**
+     * Hromadný zápis stejného úkonu (např. zaléčení, přidání medníku) do
+     * všech úlů na daném stanovišti najednou. Pro každý úl vznikne vlastní
+     * nový záznam, který lze pak jednotlivě upravit (ikona tužky).
+     */
+    fun bulkCreate(
+        stanovisteName: String,
+        treatment: String,
+        interventions: String,
+        feeding: String,
+        tasksNextTime: String,
+        note: String,
+    ) {
+        viewModelScope.launch {
+            val hiveIds = inspections.value
+                .filter { it.stanovisteName == stanovisteName }
+                .map { it.hiveId }
+                .distinct()
+            if (hiveIds.isEmpty()) return@launch
+            val now = System.currentTimeMillis()
+            val author = userName.value.ifBlank { null }
+            hiveIds.forEach { hid ->
+                db.inspectionDao().insert(
+                    Inspection(
+                        hiveId = hid,
+                        timestamp = now,
+                        stanovisteName = stanovisteName,
+                        recordedBy = author,
+                        interventions = interventions.trim().ifBlank { null },
+                        feeding = feeding.trim().ifBlank { null },
+                        treatment = treatment.trim().ifBlank { null },
+                        tasksNextTime = tasksNextTime.trim().ifBlank { null },
+                        note = note.trim().ifBlank { null },
+                    )
+                )
+            }
+        }
     }
 
     fun exportCsv(onReady: (File) -> Unit) {

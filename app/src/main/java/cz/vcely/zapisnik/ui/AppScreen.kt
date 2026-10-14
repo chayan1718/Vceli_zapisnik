@@ -20,9 +20,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoCamera
@@ -58,13 +62,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import cz.vcely.zapisnik.data.Inspection
 import cz.vcely.zapisnik.data.Stanoviste
 import cz.vcely.zapisnik.parser.Draft
+import cz.vcely.zapisnik.tasks.SeasonalTasks
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -100,6 +107,7 @@ fun AppScreen(
     val motyliceTemps by viewModel.motyliceTemps.collectAsState()
     val motyliceLoading by viewModel.motyliceLoading.collectAsState()
     var showPhoneDialog by remember { mutableStateOf(false) }
+    var showBulkDialog by remember { mutableStateOf(false) }
 
     if (showNamePrompt) {
         NamePromptDialog(onConfirm = { viewModel.setUserName(it) })
@@ -118,6 +126,17 @@ fun AppScreen(
             onCancel = { showPhoneDialog = false }
         )
     }
+    if (showBulkDialog) {
+        BulkDialog(
+            stanovisteList = stanovisteList,
+            inspections = inspections,
+            onApply = { s, treatment, interventions, feeding, tasksNextTime, note ->
+                viewModel.bulkCreate(s, treatment, interventions, feeding, tasksNextTime, note)
+                showBulkDialog = false
+            },
+            onDismiss = { showBulkDialog = false }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -131,6 +150,9 @@ fun AppScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showBulkDialog = true }) {
+                        Icon(Icons.Filled.Groups, contentDescription = "Hromadný zápis")
+                    }
                     IconButton(onClick = { showPhoneDialog = true }) {
                         Icon(Icons.Filled.Phone, contentDescription = "Telefon pro SMS upozornění")
                     }
@@ -215,6 +237,11 @@ fun AppScreen(
                         onClick = { viewModel.setTab(ScreenTab.MOTYLICE) },
                         text = { Text("Motýlice") }
                     )
+                    Tab(
+                        selected = tab == ScreenTab.MONTHLY,
+                        onClick = { viewModel.setTab(ScreenTab.MONTHLY) },
+                        text = { Text("Úkoly") }
+                    )
                 }
                 Spacer(Modifier.height(8.dp))
                 when (tab) {
@@ -247,6 +274,9 @@ fun AppScreen(
                             onSetPhone = { showPhoneDialog = true },
                             onLoadTemps = { viewModel.loadMotyliceTemps(it) }
                         )
+                    }
+                    ScreenTab.MONTHLY -> {
+                        MonthlyTasksScreen()
                     }
                 }
             }
@@ -923,4 +953,167 @@ private fun AlertPhoneDialog(current: String, onConfirm: (String) -> Unit, onCan
             TextButton(onClick = onCancel) { Text("Zrušit") }
         }
     )
+}
+
+// ---------------------------------------------------------------------------
+// Hromadný zápis (např. zaléčení, přidání medníku) pro všechny úly stanoviště
+// ---------------------------------------------------------------------------
+@Composable
+private fun BulkDialog(
+    stanovisteList: List<Stanoviste>,
+    inspections: List<Inspection>,
+    onApply: (stanoviste: String, treatment: String, interventions: String, feeding: String, tasksNextTime: String, note: String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var selected by remember { mutableStateOf<String?>(null) }
+    var treatment by remember { mutableStateOf("") }
+    var interventions by remember { mutableStateOf("") }
+    var feeding by remember { mutableStateOf("") }
+    var tasksNextTime by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf("") }
+
+    val sel = selected
+    if (sel == null) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Hromadný zápis – vyberte stanoviště") },
+            text = {
+                if (stanovisteList.isEmpty()) {
+                    Text("Zatím nemáte žádné stanoviště.")
+                } else {
+                    Column {
+                        stanovisteList.forEach { s ->
+                            val count = inspections.filter { it.stanovisteName == s.name }
+                                .map { it.hiveId }.distinct().size
+                            TextButton(
+                                onClick = { selected = s.name },
+                                enabled = count > 0,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("${s.name}  ($count úlů)", modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = onDismiss) { Text("Zrušit") } }
+        )
+    } else {
+        val hiveCount = remember(inspections, sel) {
+            inspections.filter { it.stanovisteName == sel }.map { it.hiveId }.distinct().size
+        }
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Hromadný zápis – $sel ($hiveCount úlů)") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        "Vyplněná pole se zapíší jako nový záznam do všech úlů na tomto " +
+                            "stanovišti. Prázdná pole se přeskočí. Každý záznam pak lze " +
+                            "jednotlivě upravit (ikona tužky).",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = treatment,
+                        onValueChange = { treatment = it },
+                        label = { Text("Léčení") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = interventions,
+                        onValueChange = { interventions = it },
+                        label = { Text("Zásahy (např. přidán medník)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = feeding,
+                        onValueChange = { feeding = it },
+                        label = { Text("Krmení") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = tasksNextTime,
+                        onValueChange = { tasksNextTime = it },
+                        label = { Text("Úkoly do příště") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = note,
+                        onValueChange = { note = it },
+                        label = { Text("Poznámka") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { onApply(sel, treatment, interventions, feeding, tasksNextTime, note) },
+                    enabled = listOf(treatment, interventions, feeding, tasksNextTime, note).any { it.isNotBlank() }
+                ) { Text("Zapsat do $hiveCount úlů") }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("Zrušit") } }
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Měsíční úkoly včelaře (sezónní kalendář)
+// ---------------------------------------------------------------------------
+@Composable
+private fun MonthlyTasksScreen() {
+    val currentMonth = remember { Calendar.getInstance().get(Calendar.MONTH) + 1 }
+    var month by remember { mutableStateOf(currentMonth) }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+        ) {
+            IconButton(onClick = { month = if (month == 1) 12 else month - 1 }) {
+                Icon(Icons.Filled.ChevronLeft, contentDescription = "Předchozí měsíc")
+            }
+            Text(
+                SeasonalTasks.monthNames[month - 1],
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Center
+            )
+            IconButton(onClick = { month = if (month == 12) 1 else month + 1 }) {
+                Icon(Icons.Filled.ChevronRight, contentDescription = "Další měsíc")
+            }
+        }
+        if (month == currentMonth) {
+            Text(
+                "Aktuální měsíc",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(SeasonalTasks.tasks[month].orEmpty()) { task ->
+                Card(Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Filled.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(task, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+            item { Spacer(Modifier.height(80.dp)) }
+        }
+    }
 }
