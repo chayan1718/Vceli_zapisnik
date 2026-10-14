@@ -87,6 +87,16 @@ class InspectionViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Zapne/vypne hlídání motýlice pro dané stanoviště. */
+    /** Přejmenuje stanoviště – projeví se u všech jeho úlů i v záložce Motýlice. */
+    fun renameStanoviste(s: Stanoviste, newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isBlank() || trimmed == s.name) return
+        viewModelScope.launch {
+            db.stanovisteDao().renameByName(s.name, trimmed)
+            db.inspectionDao().renameStanoviste(s.name, trimmed)
+        }
+    }
+
     fun toggleMotyliceMonitoring(s: Stanoviste) {
         viewModelScope.launch {
             db.stanovisteDao().update(s.copy(motyliceMonitoring = !s.motyliceMonitoring))
@@ -299,6 +309,15 @@ class InspectionViewModel(app: Application) : AndroidViewModel(app) {
                 if (updated.hiveId.isNotBlank()) {
                     db.hiveDao().upsert(Hive(id = updated.hiveId))
                     lastHive.value = updated.hiveId
+                }
+                // Pokud uživatel při editaci přejmenoval stanoviště, bereme to
+                // jako přejmenování celého stanoviště – projeví se u všech jeho
+                // úlů i v záložce Motýlice, ne jen u tohoto jednoho záznamu.
+                val oldStanoviste = editing.stanovisteName
+                val newStanoviste = updated.stanovisteName
+                if (!oldStanoviste.isNullOrBlank() && !newStanoviste.isNullOrBlank() && oldStanoviste != newStanoviste) {
+                    db.stanovisteDao().renameByName(oldStanoviste, newStanoviste)
+                    db.inspectionDao().renameStanoviste(oldStanoviste, newStanoviste)
                 }
                 db.inspectionDao().update(updated)
                 editingInspection.value = null

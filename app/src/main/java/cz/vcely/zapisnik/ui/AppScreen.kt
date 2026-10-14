@@ -272,7 +272,8 @@ fun AppScreen(
                             onToggle = { viewModel.toggleMotyliceMonitoring(it) },
                             onSireni = { viewModel.confirmSireni(it) },
                             onSetPhone = { showPhoneDialog = true },
-                            onLoadTemps = { viewModel.loadMotyliceTemps(it) }
+                            onLoadTemps = { viewModel.loadMotyliceTemps(it) },
+                            onRename = { s, newName -> viewModel.renameStanoviste(s, newName) }
                         )
                     }
                     ScreenTab.MONTHLY -> {
@@ -773,6 +774,7 @@ private fun MotyliceList(
     onSireni: (Stanoviste) -> Unit,
     onSetPhone: () -> Unit,
     onLoadTemps: (Stanoviste) -> Unit,
+    onRename: (Stanoviste, String) -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
         if (!phoneSet) {
@@ -809,7 +811,8 @@ private fun MotyliceList(
                         loading = loading.contains(s.id),
                         onToggle = { onToggle(s) },
                         onSireni = { onSireni(s) },
-                        onLoadTemps = { onLoadTemps(s) }
+                        onLoadTemps = { onLoadTemps(s) },
+                        onRename = { newName -> onRename(s, newName) }
                     )
                 }
                 item { Spacer(Modifier.height(80.dp)) }
@@ -832,8 +835,18 @@ private fun MotyliceCard(
     onToggle: () -> Unit,
     onSireni: () -> Unit,
     onLoadTemps: () -> Unit,
+    onRename: (String) -> Unit,
 ) {
     val hasLocation = s.latitude != null && s.longitude != null
+    var showRenameDialog by remember { mutableStateOf(false) }
+
+    if (showRenameDialog) {
+        RenameStanovisteDialog(
+            current = s.name,
+            onConfirm = { newName -> onRename(newName); showRenameDialog = false },
+            onCancel = { showRenameDialog = false }
+        )
+    }
 
     // Dokud je hlídání zapnuté a máme polohu, teploty si natáhneme (jen jednou,
     // dokud je nemáme a zrovna se nestahují – viewModel sám hlídá duplicitní volání).
@@ -845,6 +858,9 @@ private fun MotyliceCard(
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(s.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                IconButton(onClick = { showRenameDialog = true }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Filled.Edit, contentDescription = "Přejmenovat stanoviště")
+                }
                 Switch(
                     checked = s.motyliceMonitoring,
                     onCheckedChange = { onToggle() },
@@ -972,25 +988,35 @@ private fun BulkDialog(
     var tasksNextTime by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
 
+    // Nabídku stanovišť stavíme přímo ze záznamů (ne jen z tabulky Stanoviste),
+    // ať se v ní vždy objeví i stanoviště, které vzniklo jen jako text u
+    // záznamu (např. doplněné hlasem), i když k němu formálně neexistuje
+    // samostatná položka stanoviště.
+    val stanovisteNames = remember(inspections, stanovisteList) {
+        val fromInspections = inspections.mapNotNull { it.stanovisteName?.takeIf { n -> n.isNotBlank() } }
+        val fromTable = stanovisteList.map { it.name }
+        (fromInspections + fromTable).distinct().sorted()
+    }
+
     val sel = selected
     if (sel == null) {
         AlertDialog(
             onDismissRequest = onDismiss,
             title = { Text("Hromadný zápis – vyberte stanoviště") },
             text = {
-                if (stanovisteList.isEmpty()) {
-                    Text("Zatím nemáte žádné stanoviště.")
+                if (stanovisteNames.isEmpty()) {
+                    Text("Zatím nemáte žádné stanoviště s úlem.")
                 } else {
                     Column {
-                        stanovisteList.forEach { s ->
-                            val count = inspections.filter { it.stanovisteName == s.name }
+                        stanovisteNames.forEach { name ->
+                            val count = inspections.filter { it.stanovisteName == name }
                                 .map { it.hiveId }.distinct().size
                             TextButton(
-                                onClick = { selected = s.name },
+                                onClick = { selected = name },
                                 enabled = count > 0,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text("${s.name}  ($count úlů)", modifier = Modifier.weight(1f))
+                                Text("$name  ($count úlů)", modifier = Modifier.weight(1f))
                             }
                         }
                     }
@@ -1116,4 +1142,36 @@ private fun MonthlyTasksScreen() {
             item { Spacer(Modifier.height(80.dp)) }
         }
     }
+}
+
+@Composable
+private fun RenameStanovisteDialog(current: String, onConfirm: (String) -> Unit, onCancel: () -> Unit) {
+    var text by remember { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Přejmenovat stanoviště") },
+        text = {
+            Column {
+                Text(
+                    "Nový název se použije pro všechny úly tohoto stanoviště i ve " +
+                        "všech přehledech a záznamech.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text("Název stanoviště") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(text) }, enabled = text.isNotBlank()) { Text("Uložit") }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("Zrušit") }
+        }
+    )
 }

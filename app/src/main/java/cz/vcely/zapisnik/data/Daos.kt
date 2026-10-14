@@ -22,6 +22,9 @@ interface InspectionDao {
     @Query("SELECT * FROM inspections ORDER BY timestamp DESC")
     fun observeAll(): Flow<List<Inspection>>
 
+    @Query("UPDATE inspections SET stanovisteName = :newName WHERE stanovisteName = :oldName")
+    suspend fun renameStanoviste(oldName: String, newName: String)
+
     @Query("SELECT * FROM inspections WHERE hiveId = :hive ORDER BY timestamp DESC")
     fun observeForHive(hive: String): Flow<List<Inspection>>
 
@@ -42,6 +45,9 @@ interface InspectionDao {
 interface StanovisteDao {
     @Query("SELECT * FROM stanoviste ORDER BY name")
     fun observeAll(): Flow<List<Stanoviste>>
+
+    @Query("UPDATE stanoviste SET name = :newName WHERE name = :oldName")
+    suspend fun renameByName(oldName: String, newName: String)
 
     @Query("SELECT * FROM stanoviste WHERE motyliceMonitoring = 1")
     suspend fun getMonitored(): List<Stanoviste>
