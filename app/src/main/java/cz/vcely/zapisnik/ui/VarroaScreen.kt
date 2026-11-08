@@ -179,6 +179,7 @@ fun VarroaScreen(
                     // Fotka s označením; při přiblížení se dá posouvat.
                     BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                         val image = remember(bmp) { bmp.asImageBitmap() }
+                        val canvasWidth = maxWidth * zoom   // mimo Column, jinak maxWidth není dostupný
                         Column(
                             Modifier.fillMaxSize()
                                 .horizontalScroll(rememberScrollState())
@@ -186,7 +187,7 @@ fun VarroaScreen(
                         ) {
                             Canvas(
                                 Modifier
-                                    .width(maxWidth * zoom)
+                                    .width(canvasWidth)
                                     .aspectRatio(bmp.width.toFloat() / bmp.height)
                                     .onSizeChanged { canvasSize = it }
                                     .pointerInput(bmp) {
