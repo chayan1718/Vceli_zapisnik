@@ -1,6 +1,7 @@
 package cz.vcely.zapisnik.ui
 
 import android.graphics.Bitmap
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -50,10 +51,12 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.FileProvider
 import cz.vcely.zapisnik.varroa.VarroaDetector
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import kotlin.math.hypot
 import kotlin.math.max
 
@@ -106,8 +109,7 @@ fun VarroaScreen(
         }
     }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
+    fun loadPhoto(uri: Uri) {
         busy = true; error = null
         scope.launch {
             val bmp = withContext(Dispatchers.IO) { VarroaDetector.loadBitmap(context, uri) }
@@ -121,6 +123,28 @@ fun VarroaScreen(
                 pts.clear(); roiSet = false; result = null; off.clear(); manual.clear()
             }
             busy = false
+        }
+    }
+
+    // Výběr z galerie
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) loadPhoto(uri)
+    }
+
+    // Přímé vyfocení (fotka se uloží jen do dočasné paměti appky, do záznamu se nekopíruje)
+    var cameraUri by remember { mutableStateOf<Uri?>(null) }
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        if (ok) cameraUri?.let { loadPhoto(it) }
+    }
+    fun takePhoto() {
+        try {
+            val dir = File(context.cacheDir, "exports").apply { mkdirs() }
+            val file = File(dir, "podlozka_${System.currentTimeMillis()}.jpg")
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            cameraUri = uri
+            camera.launch(uri)
+        } catch (e: Exception) {
+            error = "Fotoaparát není dostupný."
         }
     }
 
@@ -138,7 +162,11 @@ fun VarroaScreen(
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Spacer(Modifier.height(12.dp))
-                    Button(onClick = { picker.launch("image/*") }) { Text("Vybrat fotku") }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Button(onClick = { takePhoto() }) { Text("Vyfotit") }
+                        Spacer(Modifier.width(8.dp))
+                        OutlinedButton(onClick = { picker.launch("image/*") }) { Text("Z galerie") }
+                    }
                 } else {
                     val res = result
                     Text(
@@ -166,8 +194,11 @@ fun VarroaScreen(
                         } else {
                             OutlinedButton(onClick = { roiSet = false; result = null; pts.clear() }) { Text("Změnit podložku") }
                         }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(onClick = { takePhoto() }) { Text("Vyfotit znovu") }
                         Spacer(Modifier.width(8.dp))
-                        OutlinedButton(onClick = { picker.launch("image/*") }) { Text("Jiná fotka") }
+                        OutlinedButton(onClick = { picker.launch("image/*") }) { Text("Jiná z galerie") }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Přiblížení", style = MaterialTheme.typography.bodySmall)
