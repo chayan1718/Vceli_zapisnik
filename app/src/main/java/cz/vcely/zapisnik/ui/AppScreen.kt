@@ -20,6 +20,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Backup
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
@@ -82,6 +84,8 @@ fun AppScreen(
     onToggleMic: () -> Unit,
     onCapturePhoto: () -> Unit,
     onExport: () -> Unit,
+    onBackupSave: () -> Unit,
+    onBackupRestore: () -> Unit,
 ) {
     val draft by viewModel.draft.collectAsState()
     val inspections by viewModel.inspections.collectAsState()
@@ -100,6 +104,8 @@ fun AppScreen(
     val motyliceTemps by viewModel.motyliceTemps.collectAsState()
     val motyliceLoading by viewModel.motyliceLoading.collectAsState()
     var showPhoneDialog by remember { mutableStateOf(false) }
+    var showBackupDialog by remember { mutableStateOf(false) }
+    var showVarroa by remember { mutableStateOf(false) }
 
     if (showNamePrompt) {
         NamePromptDialog(onConfirm = { viewModel.setUserName(it) })
@@ -119,6 +125,34 @@ fun AppScreen(
         )
     }
 
+    if (showBackupDialog) {
+        AlertDialog(
+            onDismissRequest = { showBackupDialog = false },
+            title = { Text("Záloha a obnova") },
+            text = {
+                Text(
+                    "Záloha uloží všechny záznamy, úly, stanoviště a fotky do jednoho souboru ZIP. " +
+                        "Obnova data ze zálohy přidá zpět a nic nemaže."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showBackupDialog = false; onBackupSave() }) { Text("Uložit zálohu") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { showBackupDialog = false; onBackupRestore() }) { Text("Obnovit ze zálohy") }
+                    TextButton(onClick = { showBackupDialog = false }) { Text("Zavřít") }
+                }
+            }
+        )
+    }
+    if (showVarroa) {
+        VarroaScreen(
+            onUse = { count, days -> viewModel.applyVarroa(count, days); showVarroa = false },
+            onClose = { showVarroa = false }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -133,6 +167,12 @@ fun AppScreen(
                 actions = {
                     IconButton(onClick = { showPhoneDialog = true }) {
                         Icon(Icons.Filled.Phone, contentDescription = "Telefon pro SMS upozornění")
+                    }
+                    IconButton(onClick = { showVarroa = true }) {
+                        Icon(Icons.Filled.BugReport, contentDescription = "Počítání kleštíků z fotky")
+                    }
+                    IconButton(onClick = { showBackupDialog = true }) {
+                        Icon(Icons.Filled.Backup, contentDescription = "Záloha a obnova")
                     }
                     IconButton(onClick = onExport) {
                         Icon(Icons.Filled.Download, contentDescription = "Export CSV")

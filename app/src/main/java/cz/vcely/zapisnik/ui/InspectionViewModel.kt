@@ -325,4 +325,61 @@ class InspectionViewModel(app: Application) : AndroidViewModel(app) {
             onReady(file)
         }
     }
+
+    // --- Záloha a obnova (soubor ZIP: JSON + fotky) ---
+    fun backupTo(uri: android.net.Uri, onDone: (String) -> Unit) {
+        viewModelScope.launch {
+            val msg = try {
+                val app = getApplication<Application>()
+                val sum = app.contentResolver.openOutputStream(uri)?.use {
+                    cz.vcely.zapisnik.backup.BackupManager.write(app, it)
+                } ?: throw IllegalStateException("Do zvoleného místa nejde zapisovat.")
+                "Záloha uložena: ${sum.inspections} záznamů, ${sum.hives} úlů, ${sum.stanoviste} stanovišť, ${sum.photos} fotek."
+            } catch (e: Exception) {
+                "Záloha se nepovedla: ${e.message}"
+            }
+            onDone(msg)
+        }
+    }
+
+    fun restoreFrom(uri: android.net.Uri, onDone: (String) -> Unit) {
+        viewModelScope.launch {
+            val msg = try {
+                val app = getApplication<Application>()
+                val sum = app.contentResolver.openInputStream(uri)?.use {
+                    cz.vcely.zapisnik.backup.BackupManager.restore(app, it)
+                } ?: throw IllegalStateException("Soubor nejde otevřít.")
+                "Obnoveno: ${sum.inspections} záznamů, ${sum.hives} úlů, ${sum.stanoviste} stanovišť, ${sum.photos} fotek."
+            } catch (e: Exception) {
+                "Obnova se nepovedla: ${e.message}"
+            }
+            onDone(msg)
+        }
+    }
+
+    // --- Kleštíci z fotky podložky: výsledek jde do rozpracovaného (nebo nového) záznamu ---
+    fun applyVarroa(count: Int, days: Int?) {
+        val line = buildString {
+            append("Kleštíci z fotky podložky: ").append(count)
+            if (days != null && days > 0) {
+                append(" za ").append(days).append(" dní (")
+                append(String.format(java.util.Locale("cs"), "%.1f", count.toDouble() / days))
+                append(" za den)")
+            }
+        }
+        val cur = draft.value
+        if (cur != null) {
+            draft.value = cur.copy(
+                miteDrop = count.toString(),
+                note = listOf(cur.note, line).filter { it.isNotBlank() }.joinToString("\n")
+            )
+        } else {
+            draft.value = Draft(
+                hiveId = lastHive.value,
+                stanovisteName = currentStanovisteName.value.orEmpty(),
+                miteDrop = count.toString(),
+                note = line
+            )
+        }
+    }
 }

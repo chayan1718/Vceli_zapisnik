@@ -15,6 +15,13 @@ interface HiveDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(hive: Hive)
+
+    // Záloha a obnova (nemění schéma databáze).
+    @Query("SELECT * FROM hives ORDER BY id")
+    suspend fun getAll(): List<Hive>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(hives: List<Hive>)
 }
 
 @Dao
@@ -36,6 +43,10 @@ interface InspectionDao {
 
     @Query("SELECT * FROM inspections ORDER BY hiveId, timestamp")
     suspend fun getAllForExport(): List<Inspection>
+
+    // Obnova ze zálohy: záznamy se stejným id se přepíšou, ostatní zůstanou.
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(inspections: List<Inspection>)
 }
 
 @Dao
@@ -51,4 +62,11 @@ interface StanovisteDao {
 
     @Update
     suspend fun update(stanoviste: Stanoviste)
+
+    // Záloha a obnova.
+    @Query("SELECT * FROM stanoviste ORDER BY id")
+    suspend fun getAll(): List<Stanoviste>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(stanoviste: List<Stanoviste>)
 }
