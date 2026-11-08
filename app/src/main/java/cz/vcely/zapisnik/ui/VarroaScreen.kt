@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -125,7 +126,7 @@ fun VarroaScreen(
 
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize()) {
-            Column(Modifier.fillMaxSize().padding(12.dp)) {
+            Column(Modifier.fillMaxSize().safeDrawingPadding().padding(12.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("Kleštíci na podložce", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                     TextButton(onClick = onClose) { Text("Zavřít") }
@@ -259,18 +260,17 @@ fun VarroaScreen(
                             value = sens, onValueChange = { sens = it }, valueRange = 40f..90f,
                             onValueChangeFinished = { runDetection() }
                         )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedTextField(
-                                value = daysText, onValueChange = { daysText = it.filter(Char::isDigit).take(2) },
-                                label = { Text("Dní na podložce") }, singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                modifier = Modifier.weight(1f)
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            Button(onClick = { onUse(total(), daysText.toIntOrNull()?.takeIf { it > 0 }) }) {
-                                Text("Přidat do záznamu")
-                            }
-                        }
+                        OutlinedTextField(
+                            value = daysText, onValueChange = { daysText = it.filter(Char::isDigit).take(2) },
+                            label = { Text("Dní na podložce (nepovinné)") }, singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Button(
+                            onClick = { onUse(total(), daysText.toIntOrNull()?.takeIf { it > 0 }) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Přidat do záznamu") }
                     }
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
