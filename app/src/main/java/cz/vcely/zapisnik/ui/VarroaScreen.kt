@@ -126,7 +126,7 @@ fun VarroaScreen(
 
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize()) {
-            Column(Modifier.fillMaxSize().safeDrawingPadding().padding(12.dp)) {
+            Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(12.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("Kleštíci na podložce", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                     TextButton(onClick = onClose) { Text("Zavřít") }
@@ -177,8 +177,41 @@ fun VarroaScreen(
                         )
                     }
 
+                    if (busy) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
+                            CircularProgressIndicator(Modifier.width(20.dp).height(20.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp)); Text("Počítám…")
+                        }
+                    } else if (result != null) {
+                        val r = result!!
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(total().toString(), style = MaterialTheme.typography.displaySmall)
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                "automaticky ${r.total}, ručně +${manual.size} / −${off.sumOf { r.blobs[it].n }}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        Text("Citlivost ${sens.toInt()} (nižší číslo hlásí víc skvrn)", style = MaterialTheme.typography.bodySmall)
+                        Slider(
+                            value = sens, onValueChange = { sens = it }, valueRange = 40f..90f,
+                            onValueChangeFinished = { runDetection() }
+                        )
+                        OutlinedTextField(
+                            value = daysText, onValueChange = { daysText = it.filter(Char::isDigit).take(2) },
+                            label = { Text("Dní na podložce (nepovinné)") }, singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Button(
+                            onClick = { onUse(total(), daysText.toIntOrNull()?.takeIf { it > 0 }) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Přidat do záznamu") }
+                    }
+                    Spacer(Modifier.height(8.dp))
                     // Fotka s označením; při přiblížení se dá posouvat.
-                    BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                    BoxWithConstraints(Modifier.height(420.dp).fillMaxWidth()) {
                         val image = remember(bmp) { bmp.asImageBitmap() }
                         val canvasWidth = maxWidth * zoom   // mimo Column, jinak maxWidth není dostupný
                         Column(
@@ -240,38 +273,6 @@ fun VarroaScreen(
                         }
                     }
 
-                    if (busy) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
-                            CircularProgressIndicator(Modifier.width(20.dp).height(20.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp)); Text("Počítám…")
-                        }
-                    } else if (result != null) {
-                        val r = result!!
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(total().toString(), style = MaterialTheme.typography.displaySmall)
-                            Spacer(Modifier.width(12.dp))
-                            Text(
-                                "automaticky ${r.total}, ručně +${manual.size} / −${off.sumOf { r.blobs[it].n }}",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                        Text("Citlivost ${sens.toInt()} (nižší číslo hlásí víc skvrn)", style = MaterialTheme.typography.bodySmall)
-                        Slider(
-                            value = sens, onValueChange = { sens = it }, valueRange = 40f..90f,
-                            onValueChangeFinished = { runDetection() }
-                        )
-                        OutlinedTextField(
-                            value = daysText, onValueChange = { daysText = it.filter(Char::isDigit).take(2) },
-                            label = { Text("Dní na podložce (nepovinné)") }, singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Button(
-                            onClick = { onUse(total(), daysText.toIntOrNull()?.takeIf { it > 0 }) },
-                            modifier = Modifier.fillMaxWidth()
-                        ) { Text("Přidat do záznamu") }
-                    }
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
