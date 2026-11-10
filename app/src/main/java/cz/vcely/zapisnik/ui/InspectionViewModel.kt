@@ -303,6 +303,36 @@ class InspectionViewModel(app: Application) : AndroidViewModel(app) {
             .map { it.first }
             .sortedWith(compareBy({ it.toIntOrNull() == null }, { it.toIntOrNull() ?: 0 }, { it }))
 
+    // --- Navigace v záložce Přehled úlů: stanoviště -> úly -> záznamy úlu ---
+    // Drží se ve ViewModelu, aby se po úpravě záznamu přehled vrátil na stejné místo.
+    val overviewStanoviste = MutableStateFlow<String?>(null)
+    val overviewHive = MutableStateFlow<String?>(null)
+
+    // --- Oprava přepisu hlasu a znovunačtení polí z opraveného přepisu ---
+    private suspend fun reparse(d: Draft): Draft {
+        val text = d.rawTranscript.trim()
+        if (text.isBlank()) return d
+        val hive = d.hiveId.ifBlank { null }
+        val parsed = LlmParser.parse(text, hive)
+            ?: InspectionParser.parse(text, hive, hives.value.map { it.id })
+        // Co se nemá z přepisu měnit: úl, stanoviště, datum, fotka, poloha a sám přepis.
+        return parsed.copy(
+            hiveId = d.hiveId, stanovisteName = d.stanovisteName, timestamp = d.timestamp,
+            photoPath = d.photoPath, latitude = d.latitude, longitude = d.longitude,
+            rawTranscript = d.rawTranscript,
+        )
+    }
+
+    fun reparseDraft() {
+        val d = draft.value ?: return
+        viewModelScope.launch { draft.value = reparse(d) }
+    }
+
+    fun reparseBulkDraft() {
+        val d = bulkDraft.value ?: return
+        viewModelScope.launch { bulkDraft.value = reparse(d) }
+    }
+
     /** Úprava návrhu hromadného záznamu před schválením (datum, léčení, krmení…). */
     fun updateBulkDraft(transform: (Draft) -> Draft) {
         bulkDraft.value = bulkDraft.value?.let(transform)

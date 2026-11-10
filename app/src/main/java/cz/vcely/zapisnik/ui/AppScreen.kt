@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.activity.compose.BackHandler
 import androidx.compose.material3.Card
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.DatePicker
@@ -126,6 +127,13 @@ fun AppScreen(
     val bulkDraft by viewModel.bulkDraft.collectAsState()
     val bulkHives by viewModel.bulkHives.collectAsState()
     val bulkStanoviste by viewModel.bulkStanoviste.collectAsState()
+    val overviewStanoviste by viewModel.overviewStanoviste.collectAsState()
+    val overviewHive by viewModel.overviewHive.collectAsState()
+    // Systémové tlačítko Zpět v Přehledu jde o úroveň výš (úl -> stanoviště -> seznam stanovišť).
+    BackHandler(enabled = draft == null && tab == ScreenTab.OVERVIEW && overviewStanoviste != null) {
+        if (overviewHive != null) viewModel.overviewHive.value = null
+        else viewModel.overviewStanoviste.value = null
+    }
     var showVarroa by remember { mutableStateOf(false) }
 
     if (showNamePrompt) {
@@ -173,7 +181,8 @@ fun AppScreen(
             hives = bulkHives,
             onSave = { viewModel.saveBulk(it) },
             onDiscard = { viewModel.discardBulk() },
-            onUpdate = { viewModel.updateBulkDraft(it) }
+            onUpdate = { viewModel.updateBulkDraft(it) },
+            onReparse = { viewModel.reparseBulkDraft() }
         )
     }
     if (showVarroa) {
@@ -258,7 +267,8 @@ fun AppScreen(
                     onChange = { viewModel.updateDraft(it) },
                     onSave = { viewModel.saveDraft() },
                     onDiscard = { viewModel.discardDraft() },
-                    onCapturePhoto = onCapturePhoto
+                    onCapturePhoto = onCapturePhoto,
+                    onReparse = { viewModel.reparseDraft() }
                 )
             } else {
                 if (isListening || partial.isNotBlank()) {
@@ -303,8 +313,13 @@ fun AppScreen(
                     ScreenTab.OVERVIEW -> {
                         OverviewByStanovisteScreen(
                             inspections = inspections,
-                            onHiveClick = { viewModel.showHive(it) },
-                            onBulkDictate = onBulkDictate
+                            selectedStanoviste = overviewStanoviste,
+                            selectedHive = overviewHive,
+                            onSelectStanoviste = { viewModel.overviewStanoviste.value = it; viewModel.overviewHive.value = null },
+                            onSelectHive = { viewModel.overviewHive.value = it },
+                            onBulkDictate = onBulkDictate,
+                            onEdit = { viewModel.startEditing(it) },
+                            onDelete = { viewModel.deleteInspection(it) }
                         )
                     }
                     ScreenTab.MOTYLICE -> {
@@ -574,18 +589,24 @@ private fun buildStanovisteOverview(list: List<Inspection>): List<StanovisteOver
 @Composable
 private fun OverviewByStanovisteScreen(
     inspections: List<Inspection>,
-    onHiveClick: (String) -> Unit,
+    selectedStanoviste: String?,
+    selectedHive: String?,
+    onSelectStanoviste: (String?) -> Unit,
+    onSelectHive: (String?) -> Unit,
     onBulkDictate: (String) -> Unit,
+    onEdit: (Inspection) -> Unit,
+    onDelete: (Inspection) -> Unit,
 ) {
-    var selectedStanoviste by remember { mutableStateOf<String?>(null) }
     val sel = selectedStanoviste
     if (sel == null) {
+        // 1. úroveň: stanoviště
         val stanovisteOverview = remember(inspections) { buildStanovisteOverview(inspections) }
-        StanovisteOverviewList(stanovisteOverview, onClick = { selectedStanoviste = it }, onBulk = onBulkDictate)
-    } else {
+        StanovisteOverviewList(stanovisteOverview, onClick = { onSelectStanoviste(it) }, onBulk = onBulkDictate)
+    } else if (selectedHive == null) {
+        // 2. úroveň: úly stanoviště
         Column(Modifier.fillMaxSize()) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
-                IconButton(onClick = { selectedStanoviste = null }) {
+                IconButton(onClick = { onSelectStanoviste(null) }) {
                     Icon(Icons.Filled.ArrowBack, contentDescription = "Zpět na stanoviště")
                 }
                 Text(sel, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
@@ -602,7 +623,24 @@ private fun OverviewByStanovisteScreen(
                     inspections.filter { (it.stanovisteName?.takeIf { n -> n.isNotBlank() } ?: UNKNOWN_STANOVISTE) == sel }
                 )
             }
-            OverviewList(hivesHere, onHiveClick = onHiveClick)
+            OverviewList(hivesHere, onHiveClick = { onSelectHive(it) })
+        }
+    } else {
+        // 3. úroveň: všechny záznamy úlu od nejnovějšího (včetně hromadných)
+        Column(Modifier.fillMaxSize()) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+                IconButton(onClick = { onSelectHive(null) }) {
+                    Icon(Icons.Filled.ArrowBack, contentDescription = "Zpět na úly stanoviště")
+                }
+                Column(Modifier.weight(1f)) {
+                    Text("Úl ${hiveLabel(selectedHive)}", style = MaterialTheme.typography.titleMedium)
+                    Text(sel, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            val records = remember(inspections, selectedHive) {
+                inspections.filter { it.hiveId == selectedHive }.sortedByDescending { it.timestamp }
+            }
+            InspectionList(records, onDelete = onDelete, onEdit = onEdit)
         }
     }
 }
@@ -706,8 +744,24 @@ private fun DraftForm(
     discardLabel: String? = "Zahodit",
     showButtons: Boolean = true,
     modifier: Modifier = Modifier,
+    onReparse: (() -> Unit)? = null,
 ) {
     val nowTs = remember { System.currentTimeMillis() }
+    var confirmReparse by remember { mutableStateOf(false) }
+    if (confirmReparse) {
+        AlertDialog(
+            onDismissRequest = { confirmReparse = false },
+            title = { Text("Znovu načíst pole z přepisu?") },
+            text = {
+                Text(
+                    "Pole záznamu (rámky, matka, krmení, léčení, poznámka…) se přepíšou tím, " +
+                        "co se rozpozná z opraveného přepisu. Úl, stanoviště, datum a fotka zůstanou."
+                )
+            },
+            confirmButton = { TextButton(onClick = { confirmReparse = false; onReparse?.invoke() }) { Text("Přepsat pole") } },
+            dismissButton = { TextButton(onClick = { confirmReparse = false }) { Text("Zrušit") } }
+        )
+    }
     Column(modifier.verticalScroll(rememberScrollState())) {
         Spacer(Modifier.height(8.dp))
         Text("Náhled záznamu", style = MaterialTheme.typography.titleLarge)
@@ -776,9 +830,19 @@ private fun DraftForm(
         section("Poznámka")
         field("Volná poznámka", draft.note) { v -> onChange { it.copy(note = v) } }
 
-        draft.rawTranscript.takeIf { it.isNotBlank() }?.let {
-            Spacer(Modifier.height(8.dp))
-            Text("Přepis: „$it“", style = MaterialTheme.typography.bodySmall)
+        section("Přepis hlasového záznamu")
+        OutlinedTextField(
+            value = draft.rawTranscript,
+            onValueChange = { v -> onChange { it.copy(rawTranscript = v) } },
+            label = { Text("Přepis řeči (opravte chyby)") },
+            minLines = 3,
+            modifier = Modifier.fillMaxWidth()
+        )
+        if (onReparse != null && draft.rawTranscript.isNotBlank()) {
+            Spacer(Modifier.height(6.dp))
+            OutlinedButton(onClick = { confirmReparse = true }, modifier = Modifier.fillMaxWidth()) {
+                Text("Znovu načíst pole z přepisu")
+            }
         }
 
         Spacer(Modifier.height(16.dp))
@@ -1047,6 +1111,7 @@ private fun BulkDialog(
     onSave: (List<String>) -> Unit,
     onDiscard: () -> Unit,
     onUpdate: ((Draft) -> Draft) -> Unit,
+    onReparse: () -> Unit,
 ) {
     var editing by remember { mutableStateOf(false) }
     val nowTs = remember { System.currentTimeMillis() }
@@ -1082,7 +1147,8 @@ private fun BulkDialog(
                         showHive = false,
                         showPhoto = false,
                         showButtons = false,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        onReparse = onReparse
                     )
                 }
             }
