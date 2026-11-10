@@ -59,10 +59,12 @@ class MainActivity : ComponentActivity() {
                     viewModel.onTranscript(text, viewModel.lastHive.value.ifBlank { null })
                 } else {
                     viewModel.setListening(false)
+                    viewModel.cancelBulkMode()
                 }
             },
             onError = { msg ->
                 viewModel.setListening(false)
+                viewModel.cancelBulkMode()
                 viewModel.setPartial("")
                 if (msg.isNotBlank()) toast(msg)
             },
@@ -157,7 +159,8 @@ class MainActivity : ComponentActivity() {
                     },
                     onBackupRestore = {
                         backupRestoreLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
-                    }
+                    },
+                    onBulkDictate = { startBulkDictation(it) }
                 )
             }
         }
@@ -175,7 +178,18 @@ class MainActivity : ComponentActivity() {
             return
         }
         // Nejdřív zjistíme/potvrdíme stanoviště podle GPS, teprve pak spustíme mikrofon.
+        viewModel.cancelBulkMode() // běžný diktát nesmí zůstat v hromadném režimu
         viewModel.beginDictation(this) { startMicAfterStanoviste() }
+    }
+
+    /** Hromadný diktát pro všechny úly vybraného stanoviště (stanoviště se nehledá podle GPS). */
+    private fun startBulkDictation(stanovisteName: String) {
+        if (viewModel.isListening.value || viewModel.draft.value != null) {
+            toast("Dokončete nejdřív rozdělaný záznam nebo diktát.")
+            return
+        }
+        viewModel.beginBulk(stanovisteName)
+        startMicAfterStanoviste()
     }
 
     private fun startMicAfterStanoviste() {

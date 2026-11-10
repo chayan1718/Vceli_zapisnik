@@ -265,9 +265,75 @@ class InspectionViewModel(app: Application) : AndroidViewModel(app) {
             }
             // Stanoviště rozpoznané (nebo zadané) při zahájení diktátu – viz beginDictation().
             if (d.stanovisteName.isBlank()) d.stanovisteName = currentStanovisteName.value.orEmpty()
+            // Hromadný záznam: návrh se nevloží do běžného náhledu, ale do hromadného dialogu.
+            val bulk = bulkStanoviste.value
+            if (bulk != null) {
+                d.hiveId = ""
+                d.stanovisteName = bulk
+                partialText.value = ""
+                isListening.value = false
+                bulkHives.value = hivesAtStanoviste(bulk)
+                bulkDraft.value = d
+                bulkStanoviste.value = null   // režim se spotřeboval, další diktát je zase běžný
+                return@launch
+            }
             partialText.value = ""
             isListening.value = false
             draft.value = d
+        }
+    }
+
+    // --- Hromadný záznam pro všechny úly stanoviště ---
+    /** Název stanoviště, pro které právě probíhá hromadný diktát (null = běžný diktát). */
+    val bulkStanoviste = MutableStateFlow<String?>(null)
+    /** Návrh hromadného záznamu čekající na potvrzení (bez čísla úlu). */
+    val bulkDraft = MutableStateFlow<Draft?>(null)
+    /** Úly, které se v návrhu nabízejí (uživatel může některé odškrtnout). */
+    val bulkHives = MutableStateFlow<List<String>>(emptyList())
+
+    /**
+     * Úly stanoviště = úly, jejichž NEJNOVĚJŠÍ záznam je z tohoto stanoviště
+     * (úl, který se přestěhoval, se u původního stanoviště už nenabízí).
+     */
+    fun hivesAtStanoviste(name: String): List<String> =
+        inspections.value
+            .groupBy { it.hiveId }
+            .mapNotNull { (id, recs) -> recs.maxByOrNull { it.timestamp }?.let { id to it } }
+            .filter { (id, r) -> id.isNotBlank() && r.stanovisteName == name }
+            .map { it.first }
+            .sortedWith(compareBy({ it.toIntOrNull() == null }, { it.toIntOrNull() ?: 0 }, { it }))
+
+    fun beginBulk(stanovisteName: String) {
+        bulkDraft.value = null
+        bulkStanoviste.value = stanovisteName
+        currentStanovisteName.value = stanovisteName
+    }
+
+    /** Vypne režim hromadného diktátu (např. při běžném diktátu nebo chybě mikrofonu). */
+    fun cancelBulkMode() { bulkStanoviste.value = null }
+
+    fun discardBulk() {
+        bulkStanoviste.value = null
+        bulkDraft.value = null
+        bulkHives.value = emptyList()
+    }
+
+    /** Uloží stejný záznam pro každý vybraný úl (každý úl dostane vlastní záznam). */
+    fun saveBulk(selectedHives: List<String>) {
+        val d = bulkDraft.value ?: return
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            for (id in selectedHives) {
+                db.hiveDao().upsert(Hive(id = id))
+                db.inspectionDao().insert(
+                    d.toInspection().copy(
+                        hiveId = id,
+                        timestamp = now,
+                        recordedBy = userName.value.ifBlank { null },
+                    )
+                )
+            }
+            discardBulk()
         }
     }
 

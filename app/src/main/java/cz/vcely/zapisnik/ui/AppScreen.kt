@@ -34,6 +34,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -86,6 +87,7 @@ fun AppScreen(
     onExport: () -> Unit,
     onBackupSave: () -> Unit,
     onBackupRestore: () -> Unit,
+    onBulkDictate: (String) -> Unit,
 ) {
     val draft by viewModel.draft.collectAsState()
     val inspections by viewModel.inspections.collectAsState()
@@ -105,6 +107,9 @@ fun AppScreen(
     val motyliceLoading by viewModel.motyliceLoading.collectAsState()
     var showPhoneDialog by remember { mutableStateOf(false) }
     var showBackupDialog by remember { mutableStateOf(false) }
+    val bulkDraft by viewModel.bulkDraft.collectAsState()
+    val bulkHives by viewModel.bulkHives.collectAsState()
+    val bulkStanoviste by viewModel.bulkStanoviste.collectAsState()
     var showVarroa by remember { mutableStateOf(false) }
 
     if (showNamePrompt) {
@@ -144,6 +149,14 @@ fun AppScreen(
                     TextButton(onClick = { showBackupDialog = false }) { Text("Zavřít") }
                 }
             }
+        )
+    }
+    bulkDraft?.let { bd ->
+        BulkDialog(
+            draft = bd,
+            hives = bulkHives,
+            onSave = { viewModel.saveBulk(it) },
+            onDiscard = { viewModel.discardBulk() }
         )
     }
     if (showVarroa) {
@@ -236,7 +249,7 @@ fun AppScreen(
                         isListening = isListening,
                         paused = voicePaused,
                         partial = partial,
-                        stanoviste = currentStanoviste
+                        stanoviste = bulkStanoviste?.let { "$it (hromadný záznam pro všechny úly)" } ?: currentStanoviste
                     )
                 }
                 TabRow(selectedTabIndex = tab.ordinal) {
@@ -273,7 +286,8 @@ fun AppScreen(
                     ScreenTab.OVERVIEW -> {
                         OverviewByStanovisteScreen(
                             inspections = inspections,
-                            onHiveClick = { viewModel.showHive(it) }
+                            onHiveClick = { viewModel.showHive(it) },
+                            onBulkDictate = onBulkDictate
                         )
                     }
                     ScreenTab.MOTYLICE -> {
@@ -541,19 +555,30 @@ private fun buildStanovisteOverview(list: List<Inspection>): List<StanovisteOver
  * (stejně jako dřív) přefiltruje záložku Záznamy na tento úl.
  */
 @Composable
-private fun OverviewByStanovisteScreen(inspections: List<Inspection>, onHiveClick: (String) -> Unit) {
+private fun OverviewByStanovisteScreen(
+    inspections: List<Inspection>,
+    onHiveClick: (String) -> Unit,
+    onBulkDictate: (String) -> Unit,
+) {
     var selectedStanoviste by remember { mutableStateOf<String?>(null) }
     val sel = selectedStanoviste
     if (sel == null) {
         val stanovisteOverview = remember(inspections) { buildStanovisteOverview(inspections) }
-        StanovisteOverviewList(stanovisteOverview, onClick = { selectedStanoviste = it })
+        StanovisteOverviewList(stanovisteOverview, onClick = { selectedStanoviste = it }, onBulk = onBulkDictate)
     } else {
         Column(Modifier.fillMaxSize()) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
                 IconButton(onClick = { selectedStanoviste = null }) {
                     Icon(Icons.Filled.ArrowBack, contentDescription = "Zpět na stanoviště")
                 }
-                Text(sel, style = MaterialTheme.typography.titleMedium)
+                Text(sel, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                if (sel != UNKNOWN_STANOVISTE) {
+                    OutlinedButton(onClick = { onBulkDictate(sel) }) {
+                        Icon(Icons.Filled.Mic, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Hromadný záznam")
+                    }
+                }
             }
             val hivesHere = remember(inspections, sel) {
                 buildOverview(
@@ -566,7 +591,11 @@ private fun OverviewByStanovisteScreen(inspections: List<Inspection>, onHiveClic
 }
 
 @Composable
-private fun StanovisteOverviewList(summaries: List<StanovisteOverview>, onClick: (String) -> Unit) {
+private fun StanovisteOverviewList(
+    summaries: List<StanovisteOverview>,
+    onClick: (String) -> Unit,
+    onBulk: (String) -> Unit,
+) {
     if (summaries.isEmpty()) {
         Column(
             Modifier.fillMaxSize(),
@@ -592,6 +621,14 @@ private fun StanovisteOverviewList(summaries: List<StanovisteOverview>, onClick:
                             if (s.lastTimestamp > 0) add("posl. ${listDateFmt.format(Date(s.lastTimestamp))}")
                         }
                         Text(detail.joinToString("  ·  "), style = MaterialTheme.typography.bodyMedium)
+                        if (s.name != UNKNOWN_STANOVISTE) {
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedButton(onClick = { onBulk(s.name) }) {
+                                Icon(Icons.Filled.Mic, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Hromadný záznam")
+                            }
+                        }
                     }
                 }
             }
@@ -962,5 +999,73 @@ private fun AlertPhoneDialog(current: String, onConfirm: (String) -> Unit, onCan
         dismissButton = {
             TextButton(onClick = onCancel) { Text("Zrušit") }
         }
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Hromadný záznam: návrh pro všechny úly stanoviště
+// ---------------------------------------------------------------------------
+@Composable
+private fun BulkDialog(
+    draft: Draft,
+    hives: List<String>,
+    onSave: (List<String>) -> Unit,
+    onDiscard: () -> Unit,
+) {
+    var excluded by remember { mutableStateOf(setOf<String>()) }
+    val selected = hives.filter { it !in excluded }
+    val rec = draft.toInspection()
+    val lines = buildList {
+        addAll(summaryLines(rec))
+        rec.interventions?.let { add("zásah: $it") }
+        rec.diseaseNotes?.let { add("nemoci: $it") }
+        rec.miteDrop?.let { add("spad roztočů $it") }
+        rec.tasksNextTime?.let { add("úkol: $it") }
+        rec.note?.let { add("poznámka: $it") }
+    }
+    AlertDialog(
+        onDismissRequest = { /* nezavírat omylem klepnutím mimo okno */ },
+        title = { Text("Hromadný záznam: ${draft.stanovisteName}") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("Záznam se uloží zvlášť pro každý zaškrtnutý úl.", style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(8.dp))
+                if (lines.isEmpty()) {
+                    Text("V diktátu jsem nic nerozpoznal.", style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    lines.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
+                }
+                draft.rawTranscript.takeIf { it.isNotBlank() }?.let {
+                    Spacer(Modifier.height(6.dp))
+                    Text("Přepis: „$it“", style = MaterialTheme.typography.bodySmall)
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("Úly na stanovišti", style = MaterialTheme.typography.titleSmall)
+                if (hives.isEmpty()) {
+                    Text("Na tomto stanovišti zatím není žádný úl se záznamem.", style = MaterialTheme.typography.bodyMedium)
+                }
+                hives.forEach { id ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { excluded = if (id in excluded) excluded - id else excluded + id },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = id !in excluded,
+                            onCheckedChange = { excluded = if (it) excluded - id else excluded + id }
+                        )
+                        Text("Úl ${hiveLabel(id)}")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = selected.isNotEmpty() && lines.isNotEmpty(),
+                onClick = { onSave(selected) }
+            ) { Text("Uložit pro ${selected.size}") }
+        },
+        dismissButton = { TextButton(onClick = onDiscard) { Text("Zahodit") } }
     )
 }
