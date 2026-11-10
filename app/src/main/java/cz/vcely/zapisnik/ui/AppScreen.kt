@@ -34,6 +34,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.TimePicker
@@ -114,6 +115,12 @@ fun AppScreen(
     val alertPhone by viewModel.alertPhone.collectAsState()
     val motyliceTemps by viewModel.motyliceTemps.collectAsState()
     val motyliceLoading by viewModel.motyliceLoading.collectAsState()
+    val appContext = LocalContext.current
+    val appVersion = remember {
+        try {
+            appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName.orEmpty()
+        } catch (e: Exception) { "" }
+    }
     var showPhoneDialog by remember { mutableStateOf(false) }
     var showBackupDialog by remember { mutableStateOf(false) }
     val bulkDraft by viewModel.bulkDraft.collectAsState()
@@ -181,7 +188,7 @@ fun AppScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text("Včelí zápisník")
+                        Text("Včelí zápisník" + if (appVersion.isBlank()) "" else " v$appVersion")
                         if (userName.isNotBlank()) {
                             Text(userName, style = MaterialTheme.typography.labelSmall)
                         }
@@ -697,9 +704,11 @@ private fun DraftForm(
     showPhoto: Boolean = true,
     saveLabel: String = "Uložit",
     discardLabel: String? = "Zahodit",
+    showButtons: Boolean = true,
+    modifier: Modifier = Modifier,
 ) {
     val nowTs = remember { System.currentTimeMillis() }
-    Column(Modifier.verticalScroll(rememberScrollState())) {
+    Column(modifier.verticalScroll(rememberScrollState())) {
         Spacer(Modifier.height(8.dp))
         Text("Náhled záznamu", style = MaterialTheme.typography.titleLarge)
         Text(
@@ -773,12 +782,14 @@ private fun DraftForm(
         }
 
         Spacer(Modifier.height(16.dp))
-        Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) { Text(saveLabel) }
-        if (discardLabel != null) {
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(onClick = onDiscard, modifier = Modifier.fillMaxWidth()) { Text(discardLabel) }
+        if (showButtons) {
+            Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) { Text(saveLabel) }
+            if (discardLabel != null) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = onDiscard, modifier = Modifier.fillMaxWidth()) { Text(discardLabel) }
+            }
         }
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(if (showButtons) 24.dp else 120.dp))
     }
 }
 
@@ -1054,6 +1065,14 @@ private fun BulkDialog(
         Dialog(onDismissRequest = { editing = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
             Surface(Modifier.fillMaxSize()) {
                 Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 16.dp)) {
+                    // Tlačítko je nahoře mimo posuvnou část, aby bylo vždy na dosah.
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Úprava hromadného záznamu", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                        Button(onClick = { editing = false }) { Text("Hotovo") }
+                    }
                     DraftForm(
                         draft = draft,
                         onChange = onUpdate,
@@ -1062,8 +1081,8 @@ private fun BulkDialog(
                         onCapturePhoto = {},
                         showHive = false,
                         showPhoto = false,
-                        saveLabel = "Hotovo, zpět na výběr úlů",
-                        discardLabel = null
+                        showButtons = false,
+                        modifier = Modifier.weight(1f)
                     )
                 }
             }
