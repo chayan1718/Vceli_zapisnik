@@ -303,6 +303,11 @@ class InspectionViewModel(app: Application) : AndroidViewModel(app) {
             .map { it.first }
             .sortedWith(compareBy({ it.toIntOrNull() == null }, { it.toIntOrNull() ?: 0 }, { it }))
 
+    /** Úprava návrhu hromadného záznamu před schválením (datum, léčení, krmení…). */
+    fun updateBulkDraft(transform: (Draft) -> Draft) {
+        bulkDraft.value = bulkDraft.value?.let(transform)
+    }
+
     fun beginBulk(stanovisteName: String) {
         bulkDraft.value = null
         bulkStanoviste.value = stanovisteName
@@ -328,7 +333,7 @@ class InspectionViewModel(app: Application) : AndroidViewModel(app) {
                 db.inspectionDao().insert(
                     d.toInspection().copy(
                         hiveId = id,
-                        timestamp = now,
+                        timestamp = if (d.timestamp > 0) d.timestamp else now,
                         recordedBy = userName.value.ifBlank { null },
                     )
                 )
@@ -359,7 +364,6 @@ class InspectionViewModel(app: Application) : AndroidViewModel(app) {
             if (editing != null) {
                 val updated = d.toInspection().copy(
                     id = editing.id,
-                    timestamp = editing.timestamp,
                     recordedBy = editing.recordedBy,
                 )
                 if (updated.hiveId.isNotBlank()) {

@@ -34,6 +34,15 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
+import androidx.compose.material3.Surface
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -156,7 +165,8 @@ fun AppScreen(
             draft = bd,
             hives = bulkHives,
             onSave = { viewModel.saveBulk(it) },
-            onDiscard = { viewModel.discardBulk() }
+            onDiscard = { viewModel.discardBulk() },
+            onUpdate = { viewModel.updateBulkDraft(it) }
         )
     }
     if (showVarroa) {
@@ -683,7 +693,12 @@ private fun DraftForm(
     onSave: () -> Unit,
     onDiscard: () -> Unit,
     onCapturePhoto: () -> Unit,
+    showHive: Boolean = true,
+    showPhoto: Boolean = true,
+    saveLabel: String = "Uložit",
+    discardLabel: String? = "Zahodit",
 ) {
+    val nowTs = remember { System.currentTimeMillis() }
     Column(Modifier.verticalScroll(rememberScrollState())) {
         Spacer(Modifier.height(8.dp))
         Text("Náhled záznamu", style = MaterialTheme.typography.titleLarge)
@@ -693,8 +708,12 @@ private fun DraftForm(
         )
         Spacer(Modifier.height(8.dp))
 
-        field("Úl (číslo nebo jméno)", draft.hiveId) { v -> onChange { it.copy(hiveId = v) } }
+        if (showHive) field("Úl (číslo nebo jméno)", draft.hiveId) { v -> onChange { it.copy(hiveId = v) } }
         field("Stanoviště", draft.stanovisteName) { v -> onChange { it.copy(stanovisteName = v) } }
+        Spacer(Modifier.height(4.dp))
+        DateTimeField("Datum a čas záznamu", if (draft.timestamp > 0) draft.timestamp else nowTs) { ts ->
+            onChange { it.copy(timestamp = ts) }
+        }
 
         section("Základ")
         field("Počet rámků v plodišti", draft.broodChamberFrames) { v -> onChange { it.copy(broodChamberFrames = v) } }
@@ -721,6 +740,7 @@ private fun DraftForm(
         field("Odebrané rámky", draft.framesRemoved) { v -> onChange { it.copy(framesRemoved = v) } }
         field("Úkoly do příště", draft.tasksNextTime) { v -> onChange { it.copy(tasksNextTime = v) } }
 
+        if (showPhoto) {
         section("Fotka a poloha")
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = onCapturePhoto) {
@@ -742,6 +762,8 @@ private fun DraftForm(
             }
         }
 
+        }
+
         section("Poznámka")
         field("Volná poznámka", draft.note) { v -> onChange { it.copy(note = v) } }
 
@@ -751,9 +773,11 @@ private fun DraftForm(
         }
 
         Spacer(Modifier.height(16.dp))
-        Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) { Text("Uložit") }
-        Spacer(Modifier.height(8.dp))
-        OutlinedButton(onClick = onDiscard, modifier = Modifier.fillMaxWidth()) { Text("Zahodit") }
+        Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) { Text(saveLabel) }
+        if (discardLabel != null) {
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = onDiscard, modifier = Modifier.fillMaxWidth()) { Text(discardLabel) }
+        }
         Spacer(Modifier.height(24.dp))
     }
 }
@@ -1011,7 +1035,10 @@ private fun BulkDialog(
     hives: List<String>,
     onSave: (List<String>) -> Unit,
     onDiscard: () -> Unit,
+    onUpdate: ((Draft) -> Draft) -> Unit,
 ) {
+    var editing by remember { mutableStateOf(false) }
+    val nowTs = remember { System.currentTimeMillis() }
     var excluded by remember { mutableStateOf(setOf<String>()) }
     val selected = hives.filter { it !in excluded }
     val rec = draft.toInspection()
@@ -1022,6 +1049,25 @@ private fun BulkDialog(
         rec.miteDrop?.let { add("spad roztočů $it") }
         rec.tasksNextTime?.let { add("úkol: $it") }
         rec.note?.let { add("poznámka: $it") }
+    }
+    if (editing) {
+        Dialog(onDismissRequest = { editing = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Surface(Modifier.fillMaxSize()) {
+                Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 16.dp)) {
+                    DraftForm(
+                        draft = draft,
+                        onChange = onUpdate,
+                        onSave = { editing = false },
+                        onDiscard = { editing = false },
+                        onCapturePhoto = {},
+                        showHive = false,
+                        showPhoto = false,
+                        saveLabel = "Hotovo, zpět na výběr úlů",
+                        discardLabel = null
+                    )
+                }
+            }
+        }
     }
     AlertDialog(
         onDismissRequest = { /* nezavírat omylem klepnutím mimo okno */ },
@@ -1038,6 +1084,16 @@ private fun BulkDialog(
                 draft.rawTranscript.takeIf { it.isNotBlank() }?.let {
                     Spacer(Modifier.height(6.dp))
                     Text("Přepis: „$it“", style = MaterialTheme.typography.bodySmall)
+                }
+                Spacer(Modifier.height(10.dp))
+                DateTimeField("Datum a čas záznamu", if (draft.timestamp > 0) draft.timestamp else nowTs) { ts ->
+                    onUpdate { it.copy(timestamp = ts) }
+                }
+                Spacer(Modifier.height(6.dp))
+                OutlinedButton(onClick = { editing = true }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Upravit návrh")
                 }
                 Spacer(Modifier.height(12.dp))
                 Text("Úly na stanovišti", style = MaterialTheme.typography.titleSmall)
@@ -1068,4 +1124,58 @@ private fun BulkDialog(
         },
         dismissButton = { TextButton(onClick = onDiscard) { Text("Zahodit") } }
     )
+}
+
+// ---------------------------------------------------------------------------
+// Výběr data a času (klepnutí na pole otevře kalendář, pak hodiny)
+// ---------------------------------------------------------------------------
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DateTimeField(label: String, millis: Long, onChange: (Long) -> Unit) {
+    var step by remember { mutableStateOf(0) } // 0 nic, 1 kalendář, 2 hodiny
+    var pickedDate by remember { mutableStateOf<java.time.LocalDate?>(null) }
+    val zone = java.time.ZoneId.systemDefault()
+    val current = java.time.Instant.ofEpochMilli(millis).atZone(zone)
+
+    Text(label, style = MaterialTheme.typography.bodySmall)
+    OutlinedButton(onClick = { step = 1 }, modifier = Modifier.fillMaxWidth()) {
+        Text(listDateFmt.format(Date(millis)))
+    }
+
+    if (step == 1) {
+        val state = rememberDatePickerState(
+            initialSelectedDateMillis = current.toLocalDate()
+                .atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+        )
+        DatePickerDialog(
+            onDismissRequest = { step = 0 },
+            confirmButton = {
+                TextButton(onClick = {
+                    val sel = state.selectedDateMillis
+                    if (sel != null) {
+                        pickedDate = java.time.Instant.ofEpochMilli(sel).atZone(java.time.ZoneOffset.UTC).toLocalDate()
+                        step = 2
+                    } else step = 0
+                }) { Text("Dál") }
+            },
+            dismissButton = { TextButton(onClick = { step = 0 }) { Text("Zrušit") } }
+        ) { DatePicker(state = state) }
+    }
+    if (step == 2) {
+        val time = rememberTimePickerState(initialHour = current.hour, initialMinute = current.minute, is24Hour = true)
+        AlertDialog(
+            onDismissRequest = { step = 0 },
+            title = { Text("Čas záznamu") },
+            text = { TimePicker(state = time) },
+            confirmButton = {
+                TextButton(onClick = {
+                    pickedDate?.let { d ->
+                        onChange(d.atTime(time.hour, time.minute).atZone(zone).toInstant().toEpochMilli())
+                    }
+                    step = 0
+                }) { Text("Použít") }
+            },
+            dismissButton = { TextButton(onClick = { step = 0 }) { Text("Zrušit") } }
+        )
+    }
 }
