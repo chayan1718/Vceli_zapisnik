@@ -43,6 +43,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var locationPermissionLauncher: ActivityResultLauncher<Array<String>>
     private lateinit var cameraLauncher: ActivityResultLauncher<Uri>
     private lateinit var smsPermissionLauncher: ActivityResultLauncher<String>
+    private lateinit var backupSaveLauncher: ActivityResultLauncher<String>
+    private lateinit var backupRestoreLauncher: ActivityResultLauncher<Array<String>>
 
     private var pendingPhotoFile: File? = null
 
@@ -57,10 +59,12 @@ class MainActivity : ComponentActivity() {
                     viewModel.onTranscript(text, viewModel.lastHive.value.ifBlank { null })
                 } else {
                     viewModel.setListening(false)
+                    viewModel.cancelBulkMode()
                 }
             },
             onError = { msg ->
                 viewModel.setListening(false)
+                viewModel.cancelBulkMode()
                 viewModel.setPartial("")
                 if (msg.isNotBlank()) toast(msg)
             },
@@ -110,6 +114,15 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Záloha: uživatel si sám vybere, kam se ZIP uloží (Stažené, Disk…); obnova ho z něj načte.
+        backupSaveLauncher = registerForActivityResult(
+            ActivityResultContracts.CreateDocument("application/zip")
+        ) { uri -> if (uri != null) viewModel.backupTo(uri) { toast(it) } }
+
+        backupRestoreLauncher = registerForActivityResult(
+            ActivityResultContracts.OpenDocument()
+        ) { uri -> if (uri != null) viewModel.restoreFrom(uri) { toast(it) } }
+
         // Hlídání motýlice: naplánujeme denní kontrolu na pozadí (pokud už neběží)
         // a vyžádáme si oprávnění k odesílání SMS.
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
@@ -139,7 +152,15 @@ class MainActivity : ComponentActivity() {
                     viewModel = viewModel,
                     onToggleMic = { toggleMic() },
                     onCapturePhoto = { capturePhoto() },
-                    onExport = { viewModel.exportCsv { file -> shareCsv(file) } }
+                    onExport = { viewModel.exportCsv { file -> shareCsv(file) } },
+                    onBackupSave = {
+                        val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale("cs")).format(Date())
+                        backupSaveLauncher.launch("vceli_zapisnik_zaloha_$stamp.zip")
+                    },
+                    onBackupRestore = {
+                        backupRestoreLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
+                    },
+                    onBulkDictate = { startBulkDictation(it) }
                 )
             }
         }
@@ -157,7 +178,18 @@ class MainActivity : ComponentActivity() {
             return
         }
         // Nejdřív zjistíme/potvrdíme stanoviště podle GPS, teprve pak spustíme mikrofon.
+        viewModel.cancelBulkMode() // běžný diktát nesmí zůstat v hromadném režimu
         viewModel.beginDictation(this) { startMicAfterStanoviste() }
+    }
+
+    /** Hromadný diktát pro všechny úly vybraného stanoviště (stanoviště se nehledá podle GPS). */
+    private fun startBulkDictation(stanovisteName: String) {
+        if (viewModel.isListening.value || viewModel.draft.value != null) {
+            toast("Dokončete nejdřív rozdělaný záznam nebo diktát.")
+            return
+        }
+        viewModel.beginBulk(stanovisteName)
+        startMicAfterStanoviste()
     }
 
     private fun startMicAfterStanoviste() {

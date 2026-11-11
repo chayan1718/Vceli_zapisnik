@@ -275,9 +275,110 @@ class InspectionViewModel(app: Application) : AndroidViewModel(app) {
             }
             // Stanoviště rozpoznané (nebo zadané) při zahájení diktátu – viz beginDictation().
             if (d.stanovisteName.isBlank()) d.stanovisteName = currentStanovisteName.value.orEmpty()
+            // Hromadný záznam: návrh se nevloží do běžného náhledu, ale do hromadného dialogu.
+            val bulk = bulkStanoviste.value
+            if (bulk != null) {
+                d.hiveId = ""
+                d.stanovisteName = bulk
+                partialText.value = ""
+                isListening.value = false
+                bulkHives.value = hivesAtStanoviste(bulk)
+                bulkDraft.value = d
+                bulkStanoviste.value = null   // režim se spotřeboval, další diktát je zase běžný
+                return@launch
+            }
             partialText.value = ""
             isListening.value = false
             draft.value = d
+        }
+    }
+
+    // --- Hromadný záznam pro všechny úly stanoviště ---
+    /** Název stanoviště, pro které právě probíhá hromadný diktát (null = běžný diktát). */
+    val bulkStanoviste = MutableStateFlow<String?>(null)
+    /** Návrh hromadného záznamu čekající na potvrzení (bez čísla úlu). */
+    val bulkDraft = MutableStateFlow<Draft?>(null)
+    /** Úly, které se v návrhu nabízejí (uživatel může některé odškrtnout). */
+    val bulkHives = MutableStateFlow<List<String>>(emptyList())
+
+    /**
+     * Úly stanoviště = úly, jejichž NEJNOVĚJŠÍ záznam je z tohoto stanoviště
+     * (úl, který se přestěhoval, se u původního stanoviště už nenabízí).
+     */
+    fun hivesAtStanoviste(name: String): List<String> =
+        inspections.value
+            .groupBy { it.hiveId }
+            .mapNotNull { (id, recs) -> recs.maxByOrNull { it.timestamp }?.let { id to it } }
+            .filter { (id, r) -> id.isNotBlank() && r.stanovisteName == name }
+            .map { it.first }
+            .sortedWith(compareBy({ it.toIntOrNull() == null }, { it.toIntOrNull() ?: 0 }, { it }))
+
+    // --- Navigace v záložce Přehled úlů: stanoviště -> úly -> záznamy úlu ---
+    // Drží se ve ViewModelu, aby se po úpravě záznamu přehled vrátil na stejné místo.
+    val overviewStanoviste = MutableStateFlow<String?>(null)
+    val overviewHive = MutableStateFlow<String?>(null)
+
+    // --- Oprava přepisu hlasu a znovunačtení polí z opraveného přepisu ---
+    private suspend fun reparse(d: Draft): Draft {
+        val text = d.rawTranscript.trim()
+        if (text.isBlank()) return d
+        val hive = d.hiveId.ifBlank { null }
+        val parsed = LlmParser.parse(text, hive)
+            ?: InspectionParser.parse(text, hive, hives.value.map { it.id })
+        // Co se nemá z přepisu měnit: úl, stanoviště, datum, fotka, poloha a sám přepis.
+        return parsed.copy(
+            hiveId = d.hiveId, stanovisteName = d.stanovisteName, timestamp = d.timestamp,
+            photoPath = d.photoPath, latitude = d.latitude, longitude = d.longitude,
+            rawTranscript = d.rawTranscript,
+        )
+    }
+
+    fun reparseDraft() {
+        val d = draft.value ?: return
+        viewModelScope.launch { draft.value = reparse(d) }
+    }
+
+    fun reparseBulkDraft() {
+        val d = bulkDraft.value ?: return
+        viewModelScope.launch { bulkDraft.value = reparse(d) }
+    }
+
+    /** Úprava návrhu hromadného záznamu před schválením (datum, léčení, krmení…). */
+    fun updateBulkDraft(transform: (Draft) -> Draft) {
+        bulkDraft.value = bulkDraft.value?.let(transform)
+    }
+
+    fun beginBulk(stanovisteName: String) {
+        bulkDraft.value = null
+        bulkStanoviste.value = stanovisteName
+        currentStanovisteName.value = stanovisteName
+    }
+
+    /** Vypne režim hromadného diktátu (např. při běžném diktátu nebo chybě mikrofonu). */
+    fun cancelBulkMode() { bulkStanoviste.value = null }
+
+    fun discardBulk() {
+        bulkStanoviste.value = null
+        bulkDraft.value = null
+        bulkHives.value = emptyList()
+    }
+
+    /** Uloží stejný záznam pro každý vybraný úl (každý úl dostane vlastní záznam). */
+    fun saveBulk(selectedHives: List<String>) {
+        val d = bulkDraft.value ?: return
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            for (id in selectedHives) {
+                db.hiveDao().upsert(Hive(id = id))
+                db.inspectionDao().insert(
+                    d.toInspection().copy(
+                        hiveId = id,
+                        timestamp = if (d.timestamp > 0) d.timestamp else now,
+                        recordedBy = userName.value.ifBlank { null },
+                    )
+                )
+            }
+            discardBulk()
         }
     }
 
@@ -303,7 +404,6 @@ class InspectionViewModel(app: Application) : AndroidViewModel(app) {
             if (editing != null) {
                 val updated = d.toInspection().copy(
                     id = editing.id,
-                    timestamp = editing.timestamp,
                     recordedBy = editing.recordedBy,
                 )
                 if (updated.hiveId.isNotBlank()) {
@@ -381,6 +481,63 @@ class InspectionViewModel(app: Application) : AndroidViewModel(app) {
             val list = db.inspectionDao().getAllForExport()
             val file = withContext(Dispatchers.IO) { CsvExporter.write(getApplication(), list) }
             onReady(file)
+        }
+    }
+
+    // --- Záloha a obnova (soubor ZIP: JSON + fotky) ---
+    fun backupTo(uri: android.net.Uri, onDone: (String) -> Unit) {
+        viewModelScope.launch {
+            val msg = try {
+                val app = getApplication<Application>()
+                val sum = app.contentResolver.openOutputStream(uri)?.use {
+                    cz.vcely.zapisnik.backup.BackupManager.write(app, it)
+                } ?: throw IllegalStateException("Do zvoleného místa nejde zapisovat.")
+                "Záloha uložena: ${sum.inspections} záznamů, ${sum.hives} úlů, ${sum.stanoviste} stanovišť, ${sum.photos} fotek."
+            } catch (e: Exception) {
+                "Záloha se nepovedla: ${e.message}"
+            }
+            onDone(msg)
+        }
+    }
+
+    fun restoreFrom(uri: android.net.Uri, onDone: (String) -> Unit) {
+        viewModelScope.launch {
+            val msg = try {
+                val app = getApplication<Application>()
+                val sum = app.contentResolver.openInputStream(uri)?.use {
+                    cz.vcely.zapisnik.backup.BackupManager.restore(app, it)
+                } ?: throw IllegalStateException("Soubor nejde otevřít.")
+                "Obnoveno: ${sum.inspections} záznamů, ${sum.hives} úlů, ${sum.stanoviste} stanovišť, ${sum.photos} fotek."
+            } catch (e: Exception) {
+                "Obnova se nepovedla: ${e.message}"
+            }
+            onDone(msg)
+        }
+    }
+
+    // --- Kleštíci z fotky podložky: výsledek jde do rozpracovaného (nebo nového) záznamu ---
+    fun applyVarroa(count: Int, days: Int?) {
+        val line = buildString {
+            append("Kleštíci z fotky podložky: ").append(count)
+            if (days != null && days > 0) {
+                append(" za ").append(days).append(" dní (")
+                append(String.format(java.util.Locale("cs"), "%.1f", count.toDouble() / days))
+                append(" za den)")
+            }
+        }
+        val cur = draft.value
+        if (cur != null) {
+            draft.value = cur.copy(
+                miteDrop = count.toString(),
+                note = listOf(cur.note, line).filter { it.isNotBlank() }.joinToString("\n")
+            )
+        } else {
+            draft.value = Draft(
+                hiveId = lastHive.value,
+                stanovisteName = currentStanovisteName.value.orEmpty(),
+                miteDrop = count.toString(),
+                note = line
+            )
         }
     }
 }

@@ -34,6 +34,7 @@ data class Draft(
     var latitude: String = "",
     var longitude: String = "",
     var rawTranscript: String = "",
+    var timestamp: Long = 0L,        // datum a čas záznamu (ms); 0 = teď, při uložení
 ) {
     fun toInspection(): Inspection {
         fun d(s: String): Double? = s.trim().replace(',', '.').toDoubleOrNull()
@@ -70,6 +71,7 @@ data class Draft(
             longitude = d(longitude),
             note = t(note),
             rawTranscript = t(rawTranscript),
+            timestamp = if (timestamp > 0) timestamp else System.currentTimeMillis(),
         )
     }
 
@@ -107,6 +109,7 @@ data class Draft(
                 latitude = s(i.latitude),
                 longitude = s(i.longitude),
                 rawTranscript = i.rawTranscript.orEmpty(),
+                timestamp = i.timestamp,
             )
         }
     }

@@ -20,9 +20,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.ChevronLeft
-import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Backup
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
@@ -35,7 +34,20 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.activity.compose.BackHandler
 import androidx.compose.material3.Card
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
+import androidx.compose.material3.Surface
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -89,6 +101,9 @@ fun AppScreen(
     onToggleMic: () -> Unit,
     onCapturePhoto: () -> Unit,
     onExport: () -> Unit,
+    onBackupSave: () -> Unit,
+    onBackupRestore: () -> Unit,
+    onBulkDictate: (String) -> Unit,
 ) {
     val draft by viewModel.draft.collectAsState()
     val inspections by viewModel.inspections.collectAsState()
@@ -106,8 +121,25 @@ fun AppScreen(
     val alertPhone by viewModel.alertPhone.collectAsState()
     val motyliceTemps by viewModel.motyliceTemps.collectAsState()
     val motyliceLoading by viewModel.motyliceLoading.collectAsState()
+    val appContext = LocalContext.current
+    val appVersion = remember {
+        try {
+            appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName.orEmpty()
+        } catch (e: Exception) { "" }
+    }
     var showPhoneDialog by remember { mutableStateOf(false) }
-    var showBulkDialog by remember { mutableStateOf(false) }
+    var showBackupDialog by remember { mutableStateOf(false) }
+    val bulkDraft by viewModel.bulkDraft.collectAsState()
+    val bulkHives by viewModel.bulkHives.collectAsState()
+    val bulkStanoviste by viewModel.bulkStanoviste.collectAsState()
+    val overviewStanoviste by viewModel.overviewStanoviste.collectAsState()
+    val overviewHive by viewModel.overviewHive.collectAsState()
+    // Systémové tlačítko Zpět v Přehledu jde o úroveň výš (úl -> stanoviště -> seznam stanovišť).
+    BackHandler(enabled = draft == null && tab == ScreenTab.OVERVIEW && overviewStanoviste != null) {
+        if (overviewHive != null) viewModel.overviewHive.value = null
+        else viewModel.overviewStanoviste.value = null
+    }
+    var showVarroa by remember { mutableStateOf(false) }
 
     if (showNamePrompt) {
         NamePromptDialog(onConfirm = { viewModel.setUserName(it) })
@@ -138,12 +170,50 @@ fun AppScreen(
         )
     }
 
+    if (showBackupDialog) {
+        AlertDialog(
+            onDismissRequest = { showBackupDialog = false },
+            title = { Text("Záloha a obnova") },
+            text = {
+                Text(
+                    "Záloha uloží všechny záznamy, úly, stanoviště a fotky do jednoho souboru ZIP. " +
+                        "Obnova data ze zálohy přidá zpět a nic nemaže."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showBackupDialog = false; onBackupSave() }) { Text("Uložit zálohu") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { showBackupDialog = false; onBackupRestore() }) { Text("Obnovit ze zálohy") }
+                    TextButton(onClick = { showBackupDialog = false }) { Text("Zavřít") }
+                }
+            }
+        )
+    }
+    bulkDraft?.let { bd ->
+        BulkDialog(
+            draft = bd,
+            hives = bulkHives,
+            onSave = { viewModel.saveBulk(it) },
+            onDiscard = { viewModel.discardBulk() },
+            onUpdate = { viewModel.updateBulkDraft(it) },
+            onReparse = { viewModel.reparseBulkDraft() }
+        )
+    }
+    if (showVarroa) {
+        VarroaScreen(
+            onUse = { count, days -> viewModel.applyVarroa(count, days); showVarroa = false },
+            onClose = { showVarroa = false }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Column {
-                        Text("Včelí zápisník")
+                        Text("Včelí zápisník" + if (appVersion.isBlank()) "" else " v$appVersion")
                         if (userName.isNotBlank()) {
                             Text(userName, style = MaterialTheme.typography.labelSmall)
                         }
@@ -155,6 +225,12 @@ fun AppScreen(
                     }
                     IconButton(onClick = { showPhoneDialog = true }) {
                         Icon(Icons.Filled.Phone, contentDescription = "Telefon pro SMS upozornění")
+                    }
+                    IconButton(onClick = { showVarroa = true }) {
+                        Icon(Icons.Filled.BugReport, contentDescription = "Počítání kleštíků z fotky")
+                    }
+                    IconButton(onClick = { showBackupDialog = true }) {
+                        Icon(Icons.Filled.Backup, contentDescription = "Záloha a obnova")
                     }
                     IconButton(onClick = onExport) {
                         Icon(Icons.Filled.Download, contentDescription = "Export CSV")
@@ -201,6 +277,7 @@ fun AppScreen(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .padding(horizontal = 16.dp)
         ) {
             val current = draft
@@ -210,7 +287,8 @@ fun AppScreen(
                     onChange = { viewModel.updateDraft(it) },
                     onSave = { viewModel.saveDraft() },
                     onDiscard = { viewModel.discardDraft() },
-                    onCapturePhoto = onCapturePhoto
+                    onCapturePhoto = onCapturePhoto,
+                    onReparse = { viewModel.reparseDraft() }
                 )
             } else {
                 if (isListening || partial.isNotBlank()) {
@@ -218,7 +296,7 @@ fun AppScreen(
                         isListening = isListening,
                         paused = voicePaused,
                         partial = partial,
-                        stanoviste = currentStanoviste
+                        stanoviste = bulkStanoviste?.let { "$it (hromadný záznam pro všechny úly)" } ?: currentStanoviste
                     )
                 }
                 TabRow(selectedTabIndex = tab.ordinal) {
@@ -260,7 +338,13 @@ fun AppScreen(
                     ScreenTab.OVERVIEW -> {
                         OverviewByStanovisteScreen(
                             inspections = inspections,
-                            onHiveClick = { viewModel.showHive(it) }
+                            selectedStanoviste = overviewStanoviste,
+                            selectedHive = overviewHive,
+                            onSelectStanoviste = { viewModel.overviewStanoviste.value = it; viewModel.overviewHive.value = null },
+                            onSelectHive = { viewModel.overviewHive.value = it },
+                            onBulkDictate = onBulkDictate,
+                            onEdit = { viewModel.startEditing(it) },
+                            onDelete = { viewModel.deleteInspection(it) }
                         )
                     }
                     ScreenTab.MOTYLICE -> {
@@ -532,32 +616,70 @@ private fun buildStanovisteOverview(list: List<Inspection>): List<StanovisteOver
  * (stejně jako dřív) přefiltruje záložku Záznamy na tento úl.
  */
 @Composable
-private fun OverviewByStanovisteScreen(inspections: List<Inspection>, onHiveClick: (String) -> Unit) {
-    var selectedStanoviste by remember { mutableStateOf<String?>(null) }
+private fun OverviewByStanovisteScreen(
+    inspections: List<Inspection>,
+    selectedStanoviste: String?,
+    selectedHive: String?,
+    onSelectStanoviste: (String?) -> Unit,
+    onSelectHive: (String?) -> Unit,
+    onBulkDictate: (String) -> Unit,
+    onEdit: (Inspection) -> Unit,
+    onDelete: (Inspection) -> Unit,
+) {
     val sel = selectedStanoviste
     if (sel == null) {
+        // 1. úroveň: stanoviště
         val stanovisteOverview = remember(inspections) { buildStanovisteOverview(inspections) }
-        StanovisteOverviewList(stanovisteOverview, onClick = { selectedStanoviste = it })
-    } else {
+        StanovisteOverviewList(stanovisteOverview, onClick = { onSelectStanoviste(it) }, onBulk = onBulkDictate)
+    } else if (selectedHive == null) {
+        // 2. úroveň: úly stanoviště
         Column(Modifier.fillMaxSize()) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
-                IconButton(onClick = { selectedStanoviste = null }) {
+                IconButton(onClick = { onSelectStanoviste(null) }) {
                     Icon(Icons.Filled.ArrowBack, contentDescription = "Zpět na stanoviště")
                 }
-                Text(sel, style = MaterialTheme.typography.titleMedium)
+                Text(sel, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                if (sel != UNKNOWN_STANOVISTE) {
+                    OutlinedButton(onClick = { onBulkDictate(sel) }) {
+                        Icon(Icons.Filled.Mic, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Hromadný záznam")
+                    }
+                }
             }
             val hivesHere = remember(inspections, sel) {
                 buildOverview(
                     inspections.filter { (it.stanovisteName?.takeIf { n -> n.isNotBlank() } ?: UNKNOWN_STANOVISTE) == sel }
                 )
             }
-            OverviewList(hivesHere, onHiveClick = onHiveClick)
+            OverviewList(hivesHere, onHiveClick = { onSelectHive(it) })
+        }
+    } else {
+        // 3. úroveň: všechny záznamy úlu od nejnovějšího (včetně hromadných)
+        Column(Modifier.fillMaxSize()) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+                IconButton(onClick = { onSelectHive(null) }) {
+                    Icon(Icons.Filled.ArrowBack, contentDescription = "Zpět na úly stanoviště")
+                }
+                Column(Modifier.weight(1f)) {
+                    Text("Úl ${hiveLabel(selectedHive)}", style = MaterialTheme.typography.titleMedium)
+                    Text(sel, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            val records = remember(inspections, selectedHive) {
+                inspections.filter { it.hiveId == selectedHive }.sortedByDescending { it.timestamp }
+            }
+            InspectionList(records, onDelete = onDelete, onEdit = onEdit)
         }
     }
 }
 
 @Composable
-private fun StanovisteOverviewList(summaries: List<StanovisteOverview>, onClick: (String) -> Unit) {
+private fun StanovisteOverviewList(
+    summaries: List<StanovisteOverview>,
+    onClick: (String) -> Unit,
+    onBulk: (String) -> Unit,
+) {
     if (summaries.isEmpty()) {
         Column(
             Modifier.fillMaxSize(),
@@ -583,6 +705,14 @@ private fun StanovisteOverviewList(summaries: List<StanovisteOverview>, onClick:
                             if (s.lastTimestamp > 0) add("posl. ${listDateFmt.format(Date(s.lastTimestamp))}")
                         }
                         Text(detail.joinToString("  ·  "), style = MaterialTheme.typography.bodyMedium)
+                        if (s.name != UNKNOWN_STANOVISTE) {
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedButton(onClick = { onBulk(s.name) }) {
+                                Icon(Icons.Filled.Mic, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Hromadný záznam")
+                            }
+                        }
                     }
                 }
             }
@@ -637,8 +767,31 @@ private fun DraftForm(
     onSave: () -> Unit,
     onDiscard: () -> Unit,
     onCapturePhoto: () -> Unit,
+    showHive: Boolean = true,
+    showPhoto: Boolean = true,
+    saveLabel: String = "Uložit",
+    discardLabel: String? = "Zahodit",
+    showButtons: Boolean = true,
+    modifier: Modifier = Modifier,
+    onReparse: (() -> Unit)? = null,
 ) {
-    Column(Modifier.verticalScroll(rememberScrollState())) {
+    val nowTs = remember { System.currentTimeMillis() }
+    var confirmReparse by remember { mutableStateOf(false) }
+    if (confirmReparse) {
+        AlertDialog(
+            onDismissRequest = { confirmReparse = false },
+            title = { Text("Znovu načíst pole z přepisu?") },
+            text = {
+                Text(
+                    "Pole záznamu (rámky, matka, krmení, léčení, poznámka…) se přepíšou tím, " +
+                        "co se rozpozná z opraveného přepisu. Úl, stanoviště, datum a fotka zůstanou."
+                )
+            },
+            confirmButton = { TextButton(onClick = { confirmReparse = false; onReparse?.invoke() }) { Text("Přepsat pole") } },
+            dismissButton = { TextButton(onClick = { confirmReparse = false }) { Text("Zrušit") } }
+        )
+    }
+    Column(modifier.verticalScroll(rememberScrollState())) {
         Spacer(Modifier.height(8.dp))
         Text("Náhled záznamu", style = MaterialTheme.typography.titleLarge)
         Text(
@@ -647,8 +800,12 @@ private fun DraftForm(
         )
         Spacer(Modifier.height(8.dp))
 
-        field("Úl (číslo nebo jméno)", draft.hiveId) { v -> onChange { it.copy(hiveId = v) } }
+        if (showHive) field("Úl (číslo nebo jméno)", draft.hiveId) { v -> onChange { it.copy(hiveId = v) } }
         field("Stanoviště", draft.stanovisteName) { v -> onChange { it.copy(stanovisteName = v) } }
+        Spacer(Modifier.height(4.dp))
+        DateTimeField("Datum a čas záznamu", if (draft.timestamp > 0) draft.timestamp else nowTs) { ts ->
+            onChange { it.copy(timestamp = ts) }
+        }
 
         section("Základ")
         field("Počet rámků v plodišti", draft.broodChamberFrames) { v -> onChange { it.copy(broodChamberFrames = v) } }
@@ -675,6 +832,7 @@ private fun DraftForm(
         field("Odebrané rámky", draft.framesRemoved) { v -> onChange { it.copy(framesRemoved = v) } }
         field("Úkoly do příště", draft.tasksNextTime) { v -> onChange { it.copy(tasksNextTime = v) } }
 
+        if (showPhoto) {
         section("Fotka a poloha")
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = onCapturePhoto) {
@@ -696,19 +854,35 @@ private fun DraftForm(
             }
         }
 
+        }
+
         section("Poznámka")
         field("Volná poznámka", draft.note) { v -> onChange { it.copy(note = v) } }
 
-        draft.rawTranscript.takeIf { it.isNotBlank() }?.let {
-            Spacer(Modifier.height(8.dp))
-            Text("Přepis: „$it“", style = MaterialTheme.typography.bodySmall)
+        section("Přepis hlasového záznamu")
+        OutlinedTextField(
+            value = draft.rawTranscript,
+            onValueChange = { v -> onChange { it.copy(rawTranscript = v) } },
+            label = { Text("Přepis řeči (opravte chyby)") },
+            minLines = 3,
+            modifier = Modifier.fillMaxWidth()
+        )
+        if (onReparse != null && draft.rawTranscript.isNotBlank()) {
+            Spacer(Modifier.height(6.dp))
+            OutlinedButton(onClick = { confirmReparse = true }, modifier = Modifier.fillMaxWidth()) {
+                Text("Znovu načíst pole z přepisu")
+            }
         }
 
         Spacer(Modifier.height(16.dp))
-        Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) { Text("Uložit") }
-        Spacer(Modifier.height(8.dp))
-        OutlinedButton(onClick = onDiscard, modifier = Modifier.fillMaxWidth()) { Text("Zahodit") }
-        Spacer(Modifier.height(24.dp))
+        if (showButtons) {
+            Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) { Text(saveLabel) }
+            if (discardLabel != null) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = onDiscard, modifier = Modifier.fillMaxWidth()) { Text(discardLabel) }
+            }
+        }
+        Spacer(Modifier.height(if (showButtons) 24.dp else 120.dp))
     }
 }
 
@@ -972,206 +1146,165 @@ private fun AlertPhoneDialog(current: String, onConfirm: (String) -> Unit, onCan
 }
 
 // ---------------------------------------------------------------------------
-// Hromadný zápis (např. zaléčení, přidání medníku) pro všechny úly stanoviště
+// Hromadný záznam: návrh pro všechny úly stanoviště
 // ---------------------------------------------------------------------------
 @Composable
 private fun BulkDialog(
-    stanovisteList: List<Stanoviste>,
-    inspections: List<Inspection>,
-    onApply: (stanoviste: String, treatment: String, interventions: String, feeding: String, tasksNextTime: String, note: String) -> Unit,
-    onDismiss: () -> Unit,
+    draft: Draft,
+    hives: List<String>,
+    onSave: (List<String>) -> Unit,
+    onDiscard: () -> Unit,
+    onUpdate: ((Draft) -> Draft) -> Unit,
+    onReparse: () -> Unit,
 ) {
-    var selected by remember { mutableStateOf<String?>(null) }
-    var treatment by remember { mutableStateOf("") }
-    var interventions by remember { mutableStateOf("") }
-    var feeding by remember { mutableStateOf("") }
-    var tasksNextTime by remember { mutableStateOf("") }
-    var note by remember { mutableStateOf("") }
-
-    // Nabídku stanovišť stavíme přímo ze záznamů (ne jen z tabulky Stanoviste),
-    // ať se v ní vždy objeví i stanoviště, které vzniklo jen jako text u
-    // záznamu (např. doplněné hlasem), i když k němu formálně neexistuje
-    // samostatná položka stanoviště.
-    val stanovisteNames = remember(inspections, stanovisteList) {
-        val fromInspections = inspections.mapNotNull { it.stanovisteName?.takeIf { n -> n.isNotBlank() } }
-        val fromTable = stanovisteList.map { it.name }
-        (fromInspections + fromTable).distinct().sorted()
+    var editing by remember { mutableStateOf(false) }
+    val nowTs = remember { System.currentTimeMillis() }
+    var excluded by remember { mutableStateOf(setOf<String>()) }
+    val selected = hives.filter { it !in excluded }
+    val rec = draft.toInspection()
+    val lines = buildList {
+        addAll(summaryLines(rec))
+        rec.interventions?.let { add("zásah: $it") }
+        rec.diseaseNotes?.let { add("nemoci: $it") }
+        rec.miteDrop?.let { add("spad roztočů $it") }
+        rec.tasksNextTime?.let { add("úkol: $it") }
+        rec.note?.let { add("poznámka: $it") }
     }
-
-    val sel = selected
-    if (sel == null) {
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("Hromadný zápis – vyberte stanoviště") },
-            text = {
-                if (stanovisteNames.isEmpty()) {
-                    Text("Zatím nemáte žádné stanoviště s úlem.")
-                } else {
-                    Column {
-                        stanovisteNames.forEach { name ->
-                            val count = inspections.filter { it.stanovisteName == name }
-                                .map { it.hiveId }.distinct().size
-                            TextButton(
-                                onClick = { selected = name },
-                                enabled = count > 0,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("$name  ($count úlů)", modifier = Modifier.weight(1f))
-                            }
-                        }
+    if (editing) {
+        Dialog(onDismissRequest = { editing = false }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+            Surface(Modifier.fillMaxSize()) {
+                Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(horizontal = 16.dp)) {
+                    // Tlačítko je nahoře mimo posuvnou část, aby bylo vždy na dosah.
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Úprava hromadného záznamu", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                        Button(onClick = { editing = false }) { Text("Hotovo") }
                     }
-                }
-            },
-            confirmButton = {},
-            dismissButton = { TextButton(onClick = onDismiss) { Text("Zrušit") } }
-        )
-    } else {
-        val hiveCount = remember(inspections, sel) {
-            inspections.filter { it.stanovisteName == sel }.map { it.hiveId }.distinct().size
-        }
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("Hromadný zápis – $sel ($hiveCount úlů)") },
-            text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    Text(
-                        "Vyplněná pole se zapíší jako nový záznam do všech úlů na tomto " +
-                            "stanovišti. Prázdná pole se přeskočí. Každý záznam pak lze " +
-                            "jednotlivě upravit (ikona tužky).",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = treatment,
-                        onValueChange = { treatment = it },
-                        label = { Text("Léčení") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = interventions,
-                        onValueChange = { interventions = it },
-                        label = { Text("Zásahy (např. přidán medník)") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = feeding,
-                        onValueChange = { feeding = it },
-                        label = { Text("Krmení") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = tasksNextTime,
-                        onValueChange = { tasksNextTime = it },
-                        label = { Text("Úkoly do příště") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = note,
-                        onValueChange = { note = it },
-                        label = { Text("Poznámka") },
-                        modifier = Modifier.fillMaxWidth()
+                    DraftForm(
+                        draft = draft,
+                        onChange = onUpdate,
+                        onSave = { editing = false },
+                        onDiscard = { editing = false },
+                        onCapturePhoto = {},
+                        showHive = false,
+                        showPhoto = false,
+                        showButtons = false,
+                        modifier = Modifier.weight(1f),
+                        onReparse = onReparse
                     )
                 }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = { onApply(sel, treatment, interventions, feeding, tasksNextTime, note) },
-                    enabled = listOf(treatment, interventions, feeding, tasksNextTime, note).any { it.isNotBlank() }
-                ) { Text("Zapsat do $hiveCount úlů") }
-            },
-            dismissButton = { TextButton(onClick = onDismiss) { Text("Zrušit") } }
-        )
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Měsíční úkoly včelaře (sezónní kalendář)
-// ---------------------------------------------------------------------------
-@Composable
-private fun MonthlyTasksScreen() {
-    val currentMonth = remember { Calendar.getInstance().get(Calendar.MONTH) + 1 }
-    var month by remember { mutableStateOf(currentMonth) }
-
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp)
-        ) {
-            IconButton(onClick = { month = if (month == 1) 12 else month - 1 }) {
-                Icon(Icons.Filled.ChevronLeft, contentDescription = "Předchozí měsíc")
             }
-            Text(
-                SeasonalTasks.monthNames[month - 1],
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.weight(1f),
-                textAlign = TextAlign.Center
-            )
-            IconButton(onClick = { month = if (month == 12) 1 else month + 1 }) {
-                Icon(Icons.Filled.ChevronRight, contentDescription = "Další měsíc")
-            }
-        }
-        if (month == currentMonth) {
-            Text(
-                "Aktuální měsíc",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(bottom = 4.dp)
-            )
-        }
-        Spacer(Modifier.height(4.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(SeasonalTasks.tasks[month].orEmpty()) { task ->
-                Card(Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Filled.CheckCircle,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(task, style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            }
-            item { Spacer(Modifier.height(80.dp)) }
         }
     }
-}
-
-@Composable
-private fun RenameStanovisteDialog(current: String, onConfirm: (String) -> Unit, onCancel: () -> Unit) {
-    var text by remember { mutableStateOf(current) }
     AlertDialog(
-        onDismissRequest = onCancel,
-        title = { Text("Přejmenovat stanoviště") },
+        onDismissRequest = { /* nezavírat omylem klepnutím mimo okno */ },
+        title = { Text("Hromadný záznam: ${draft.stanovisteName}") },
         text = {
-            Column {
-                Text(
-                    "Nový název se použije pro všechny úly tohoto stanoviště i ve " +
-                        "všech přehledech a záznamech.",
-                    style = MaterialTheme.typography.bodySmall
-                )
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("Záznam se uloží zvlášť pro každý zaškrtnutý úl.", style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    label = { Text("Název stanoviště") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                if (lines.isEmpty()) {
+                    Text("V diktátu jsem nic nerozpoznal.", style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    lines.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
+                }
+                draft.rawTranscript.takeIf { it.isNotBlank() }?.let {
+                    Spacer(Modifier.height(6.dp))
+                    Text("Přepis: „$it“", style = MaterialTheme.typography.bodySmall)
+                }
+                Spacer(Modifier.height(10.dp))
+                DateTimeField("Datum a čas záznamu", if (draft.timestamp > 0) draft.timestamp else nowTs) { ts ->
+                    onUpdate { it.copy(timestamp = ts) }
+                }
+                Spacer(Modifier.height(6.dp))
+                OutlinedButton(onClick = { editing = true }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Upravit návrh")
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("Úly na stanovišti", style = MaterialTheme.typography.titleSmall)
+                if (hives.isEmpty()) {
+                    Text("Na tomto stanovišti zatím není žádný úl se záznamem.", style = MaterialTheme.typography.bodyMedium)
+                }
+                hives.forEach { id ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { excluded = if (id in excluded) excluded - id else excluded + id },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = id !in excluded,
+                            onCheckedChange = { excluded = if (it) excluded - id else excluded + id }
+                        )
+                        Text("Úl ${hiveLabel(id)}")
+                    }
+                }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(text) }, enabled = text.isNotBlank()) { Text("Uložit") }
+            TextButton(
+                enabled = selected.isNotEmpty() && lines.isNotEmpty(),
+                onClick = { onSave(selected) }
+            ) { Text("Uložit pro ${selected.size}") }
         },
-        dismissButton = {
-            TextButton(onClick = onCancel) { Text("Zrušit") }
-        }
+        dismissButton = { TextButton(onClick = onDiscard) { Text("Zahodit") } }
     )
+}
+
+// ---------------------------------------------------------------------------
+// Výběr data a času (klepnutí na pole otevře kalendář, pak hodiny)
+// ---------------------------------------------------------------------------
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DateTimeField(label: String, millis: Long, onChange: (Long) -> Unit) {
+    var step by remember { mutableStateOf(0) } // 0 nic, 1 kalendář, 2 hodiny
+    var pickedDate by remember { mutableStateOf<java.time.LocalDate?>(null) }
+    val zone = java.time.ZoneId.systemDefault()
+    val current = java.time.Instant.ofEpochMilli(millis).atZone(zone)
+
+    Text(label, style = MaterialTheme.typography.bodySmall)
+    OutlinedButton(onClick = { step = 1 }, modifier = Modifier.fillMaxWidth()) {
+        Text(listDateFmt.format(Date(millis)))
+    }
+
+    if (step == 1) {
+        val state = rememberDatePickerState(
+            initialSelectedDateMillis = current.toLocalDate()
+                .atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+        )
+        DatePickerDialog(
+            onDismissRequest = { step = 0 },
+            confirmButton = {
+                TextButton(onClick = {
+                    val sel = state.selectedDateMillis
+                    if (sel != null) {
+                        pickedDate = java.time.Instant.ofEpochMilli(sel).atZone(java.time.ZoneOffset.UTC).toLocalDate()
+                        step = 2
+                    } else step = 0
+                }) { Text("Dál") }
+            },
+            dismissButton = { TextButton(onClick = { step = 0 }) { Text("Zrušit") } }
+        ) { DatePicker(state = state) }
+    }
+    if (step == 2) {
+        val time = rememberTimePickerState(initialHour = current.hour, initialMinute = current.minute, is24Hour = true)
+        AlertDialog(
+            onDismissRequest = { step = 0 },
+            title = { Text("Čas záznamu") },
+            text = { TimePicker(state = time) },
+            confirmButton = {
+                TextButton(onClick = {
+                    pickedDate?.let { d ->
+                        onChange(d.atTime(time.hour, time.minute).atZone(zone).toInstant().toEpochMilli())
+                    }
+                    step = 0
+                }) { Text("Použít") }
+            },
+            dismissButton = { TextButton(onClick = { step = 0 }) { Text("Zrušit") } }
+        )
+    }
 }

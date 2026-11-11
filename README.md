@@ -21,23 +21,31 @@ Než se záznam uloží, uvidíte **náhled** a můžete cokoli opravit.
 
 ---
 
-## Verze 2.2 – co je nového
+## Verze 2.3
 
-- **Hromadný zápis pro celé stanoviště** – ikonou skupiny v horní liště
-  zadáte jeden úkon (např. léčení, přidání medníku, krmení) a appka ho
-  zapíše jako nový záznam do všech úlů na vybraném stanovišti najednou.
-  Každý vzniklý záznam pak lze jednotlivě upravit (ikona tužky) zvlášť pro
-  každý úl.
-- **Měsíční úkoly včelaře** – nová záložka **Úkoly** ukazuje orientační
-  přehled typických prací podle aktuálního měsíce (lze listovat i do
-  ostatních měsíců).
-- **Spolehlivější přejmenování stanoviště** – přejmenování stanoviště (ať
-  už přes ikonu tužky v záložce Motýlice, nebo úpravou názvu u jednoho
-  záznamu úlu) se teď promítne všude – u všech záznamů úlů i v záložce
-  Motýlice – i když se starý název lišil velikostí písmen nebo mezerou
-  navíc (např. z hlasového zápisu).
+- **Záloha a obnova dat** – ikona zálohy v horní liště uloží všechny úly,
+  stanoviště, záznamy i fotky do jednoho ZIP souboru. Obnova data jen
+  **slučuje** (nic nemaže). Na dříve exportované CSV je k dispozici převod
+  do formátu zálohy.
+- **Počítání kleštíků z fotky podložky** – ikona brouka: vyfotíte podložku
+  (nebo vyberete z galerie), vyznačíte oblast, appka spočítá kleštíky,
+  značky můžete ručně přidat či odebrat a výsledek se zapíše do záznamu
+  (spad roztočů + počet dní).
+- **Hromadný záznam pro stanoviště** – u stanoviště tlačítko „Hromadný
+  záznam": nadiktujete zásah (např. léčení), po „api stop" se zobrazí návrh
+  pro všechny úly stanoviště; úl můžete vyřadit a návrh před schválením
+  upravit.
+- **Úprava data a času záznamu** – u běžného i hromadného záznamu.
+- **Přehled úlů ve třech úrovních** – stanoviště → úly → všechny záznamy
+  úlu od nejnovějšího (včetně hromadných) s úpravou a mazáním. Tlačítko
+  Zpět jde o úroveň výš.
+- **Oprava přepisu hlasu** – přepis řeči lze v záznamu přepsat; volitelně
+  „Znovu načíst pole z přepisu" (s potvrzením) znovu vyplní pole.
+- Číslo verze je vidět v záhlaví aplikace; okna se posouvají nad klávesnici.
 
-## Z předchozích verzí (2.1 a starší)
+---
+
+## Co je v této verzi nového
 
 - **Souvislý diktát** – klepnete na **Diktovat**, appka průběžně zobrazuje, co
   slyší (živý náhled textu), a klepnutím na **Zastavit** diktování ukončíte.
