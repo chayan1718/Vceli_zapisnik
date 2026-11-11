@@ -41,11 +41,21 @@ Než se záznam uloží, uvidíte **náhled** a můžete cokoli opravit.
   Zpět jde o úroveň výš.
 - **Oprava přepisu hlasu** – přepis řeči lze v záznamu přepsat; volitelně
   „Znovu načíst pole z přepisu" (s potvrzením) znovu vyplní pole.
+- **Měsíční úkoly včelaře** (z verze 2.2) – záložka **Úkoly** ukazuje orientační
+  přehled typických prací podle aktuálního měsíce (lze listovat i do
+  ostatních měsíců).
+- **Spolehlivější přejmenování stanoviště** (z verze 2.2) – přejmenování
+  (ikona tužky v záložce Motýlice nebo úprava názvu u jednoho záznamu úlu)
+  se promítne všude – u všech záznamů úlů i v záložce Motýlice – i když se
+  starý název lišil velikostí písmen nebo mezerou navíc.
+- **Hromadný záznam se přesunul** – nový hromadný záznam diktováním (viz
+  výše) nahrazuje ikonu hromadného zápisu z horní lišty z verze 2.2.
+  Spouští se z přehledu u stanoviště.
 - Číslo verze je vidět v záhlaví aplikace; okna se posouvají nad klávesnici.
 
 ---
 
-## Co je v této verzi nového
+## Z předchozích verzí (2.2 a starší)
 
 - **Souvislý diktát** – klepnete na **Diktovat**, appka průběžně zobrazuje, co
   slyší (živý náhled textu), a klepnutím na **Zastavit** diktování ukončíte.
