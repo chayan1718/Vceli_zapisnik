@@ -21,6 +21,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Backup
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
@@ -158,18 +161,6 @@ fun AppScreen(
             onCancel = { showPhoneDialog = false }
         )
     }
-    if (showBulkDialog) {
-        BulkDialog(
-            stanovisteList = stanovisteList,
-            inspections = inspections,
-            onApply = { s, treatment, interventions, feeding, tasksNextTime, note ->
-                viewModel.bulkCreate(s, treatment, interventions, feeding, tasksNextTime, note)
-                showBulkDialog = false
-            },
-            onDismiss = { showBulkDialog = false }
-        )
-    }
-
     if (showBackupDialog) {
         AlertDialog(
             onDismissRequest = { showBackupDialog = false },
@@ -220,9 +211,6 @@ fun AppScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showBulkDialog = true }) {
-                        Icon(Icons.Filled.Groups, contentDescription = "Hromadný zápis")
-                    }
                     IconButton(onClick = { showPhoneDialog = true }) {
                         Icon(Icons.Filled.Phone, contentDescription = "Telefon pro SMS upozornění")
                     }
@@ -1307,4 +1295,92 @@ private fun DateTimeField(label: String, millis: Long, onChange: (Long) -> Unit)
             dismissButton = { TextButton(onClick = { step = 0 }) { Text("Zrušit") } }
         )
     }
+}
+
+// ---------------------------------------------------------------------------
+// Měsíční úkoly včelaře (sezónní kalendář)
+// ---------------------------------------------------------------------------
+@Composable
+private fun MonthlyTasksScreen() {
+    val currentMonth = remember { Calendar.getInstance().get(Calendar.MONTH) + 1 }
+    var month by remember { mutableStateOf(currentMonth) }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+        ) {
+            IconButton(onClick = { month = if (month == 1) 12 else month - 1 }) {
+                Icon(Icons.Filled.ChevronLeft, contentDescription = "Předchozí měsíc")
+            }
+            Text(
+                SeasonalTasks.monthNames[month - 1],
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Center
+            )
+            IconButton(onClick = { month = if (month == 12) 1 else month + 1 }) {
+                Icon(Icons.Filled.ChevronRight, contentDescription = "Další měsíc")
+            }
+        }
+        if (month == currentMonth) {
+            Text(
+                "Aktuální měsíc",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(SeasonalTasks.tasks[month].orEmpty()) { task ->
+                Card(Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Filled.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(task, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+            item { Spacer(Modifier.height(80.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun RenameStanovisteDialog(current: String, onConfirm: (String) -> Unit, onCancel: () -> Unit) {
+    var text by remember { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Přejmenovat stanoviště") },
+        text = {
+            Column {
+                Text(
+                    "Nový název se použije pro všechny úly tohoto stanoviště i ve " +
+                        "všech přehledech a záznamech.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text("Název stanoviště") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(text) }, enabled = text.isNotBlank()) { Text("Uložit") }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("Zrušit") }
+        }
+    )
 }
