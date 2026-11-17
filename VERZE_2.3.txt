@@ -1,0 +1,65 @@
+VČELÍ ZÁPISNÍK – VERZE 2.3
+==========================
+versionName: 2.3   versionCode: 6
+Datum vydání: 11. 11. 2026
+Platforma: Android (Kotlin, Jetpack Compose)
+
+Hlasem ovládaný strukturovaný deník včelaře. U úlu nadiktujete, co vidíte,
+aplikace z řeči vytáhne jednotlivé položky a uloží je jako záznam.
+
+
+NOVINKY VE VERZI 2.3
+--------------------
+1. Záloha a obnova dat
+   Ikona zálohy v horní liště uloží všechny úly, stanoviště, záznamy
+   i fotky do jednoho souboru ZIP. Obnova data ze zálohy pouze přidá
+   zpět a nic nemaže. K dispozici je i převod dříve exportovaného CSV
+   do formátu zálohy.
+
+2. Počítání kleštíků z fotky podložky
+   Ikona brouka: vyfotíte podložku (nebo vyberete fotku z galerie),
+   vyznačíte oblast, aplikace spočítá kleštíky. Značky lze ručně přidat
+   nebo odebrat. Výsledek (spad roztočů a počet dní) se zapíše do záznamu.
+
+3. Hromadný záznam pro stanoviště
+   V přehledu u stanoviště tlačítko „Hromadný záznam“. Nadiktujete zásah
+   (např. léčení), po příkazu „api stop“ se zobrazí návrh pro všechny úly
+   stanoviště. Úl lze z návrhu vyřadit a návrh před uložením upravit.
+
+4. Úprava data a času záznamu
+   U běžného i hromadného záznamu.
+
+5. Přehled úlů ve třech úrovních
+   Stanoviště -> úly -> všechny záznamy úlu od nejnovějšího (včetně
+   hromadných) s úpravou a mazáním. Tlačítko Zpět jde o úroveň výš.
+
+6. Oprava přepisu hlasu
+   Přepis řeči lze v záznamu přepsat. Volitelně lze znovu načíst pole
+   z přepisu (s potvrzením).
+
+7. Drobnosti
+   Číslo verze je vidět v záhlaví aplikace. Okna se posouvají nad
+   klávesnici (nepřekrývá úpravu přepisu ani tlačítko Hotovo).
+
+
+ZACHOVÁNO Z VĚTVE MAIN (VERZE 2.1 A 2.2)
+-----------------------------------------
+- Měsíční úkoly včelaře (sezónní kalendář, záložka Měsíční úkoly).
+- Přejmenování stanoviště (záložka Motýlice); nový název se projeví
+  u všech úlů stanoviště a ve všech přehledech a záznamech
+  (bez ohledu na velikost písmen a mezery).
+- Pojmenované úly, rozpoznání stanoviště podle GPS, přehled úlů podle
+  stanovišť.
+- Sledování teploty (model motýlice) s odesláním SMS upozornění.
+
+Poznámka ke sloučení: původní hromadný zápis z verze 2.2 (okno s výběrem
+stanoviště) nahradil nový hromadný záznam diktováním z verze 2.3.
+Ikona „Hromadný zápis“ v horní liště proto už není; spouští se z přehledu
+u stanoviště.
+
+
+STAV VÝVOJE
+-----------
+Sloučeno z větve klestici do main (merge commit 83650a6) a doplněna oprava
+po sloučení (commit 7f38527). Aplikace byla sestavena a spuštěna
+na emulátoru (Android API 37.2); funkce ověřil autor.

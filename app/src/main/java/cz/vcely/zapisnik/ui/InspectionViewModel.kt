@@ -27,7 +27,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 
-enum class ScreenTab { RECORDS, OVERVIEW, MOTYLICE }
+enum class ScreenTab { RECORDS, OVERVIEW, MOTYLICE, MONTHLY }
 
 /** Čeká na zadání názvu nového stanoviště – appka nenašla shodu v okruhu 300 m. */
 data class PendingStanoviste(val latitude: Double?, val longitude: Double?)
@@ -87,6 +87,16 @@ class InspectionViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Zapne/vypne hlídání motýlice pro dané stanoviště. */
+    /** Přejmenuje stanoviště – projeví se u všech jeho úlů i v záložce Motýlice. */
+    fun renameStanoviste(s: Stanoviste, newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isBlank() || trimmed == s.name) return
+        viewModelScope.launch {
+            db.stanovisteDao().renameByName(s.name, trimmed)
+            db.inspectionDao().renameStanoviste(s.name, trimmed)
+        }
+    }
+
     fun toggleMotyliceMonitoring(s: Stanoviste) {
         viewModelScope.launch {
             db.stanovisteDao().update(s.copy(motyliceMonitoring = !s.motyliceMonitoring))
@@ -401,6 +411,15 @@ class InspectionViewModel(app: Application) : AndroidViewModel(app) {
                     db.hiveDao().upsert(Hive(id = updated.hiveId))
                     lastHive.value = updated.hiveId
                 }
+                // Pokud uživatel při editaci přejmenoval stanoviště, bereme to
+                // jako přejmenování celého stanoviště – projeví se u všech jeho
+                // úlů i v záložce Motýlice, ne jen u tohoto jednoho záznamu.
+                val oldStanoviste = editing.stanovisteName
+                val newStanoviste = updated.stanovisteName
+                if (!oldStanoviste.isNullOrBlank() && !newStanoviste.isNullOrBlank() && oldStanoviste != newStanoviste) {
+                    db.stanovisteDao().renameByName(oldStanoviste, newStanoviste)
+                    db.inspectionDao().renameStanoviste(oldStanoviste, newStanoviste)
+                }
                 db.inspectionDao().update(updated)
                 editingInspection.value = null
             } else {
@@ -417,6 +436,45 @@ class InspectionViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deleteInspection(inspection: Inspection) {
         viewModelScope.launch { db.inspectionDao().delete(inspection) }
+    }
+
+    /**
+     * Hromadný zápis stejného úkonu (např. zaléčení, přidání medníku) do
+     * všech úlů na daném stanovišti najednou. Pro každý úl vznikne vlastní
+     * nový záznam, který lze pak jednotlivě upravit (ikona tužky).
+     */
+    fun bulkCreate(
+        stanovisteName: String,
+        treatment: String,
+        interventions: String,
+        feeding: String,
+        tasksNextTime: String,
+        note: String,
+    ) {
+        viewModelScope.launch {
+            val hiveIds = inspections.value
+                .filter { it.stanovisteName == stanovisteName }
+                .map { it.hiveId }
+                .distinct()
+            if (hiveIds.isEmpty()) return@launch
+            val now = System.currentTimeMillis()
+            val author = userName.value.ifBlank { null }
+            hiveIds.forEach { hid ->
+                db.inspectionDao().insert(
+                    Inspection(
+                        hiveId = hid,
+                        timestamp = now,
+                        stanovisteName = stanovisteName,
+                        recordedBy = author,
+                        interventions = interventions.trim().ifBlank { null },
+                        feeding = feeding.trim().ifBlank { null },
+                        treatment = treatment.trim().ifBlank { null },
+                        tasksNextTime = tasksNextTime.trim().ifBlank { null },
+                        note = note.trim().ifBlank { null },
+                    )
+                )
+            }
+        }
     }
 
     fun exportCsv(onReady: (File) -> Unit) {

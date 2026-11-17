@@ -36,10 +36,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Backup
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoCamera
@@ -88,13 +92,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import cz.vcely.zapisnik.data.Inspection
 import cz.vcely.zapisnik.data.Stanoviste
 import cz.vcely.zapisnik.parser.Draft
+import cz.vcely.zapisnik.tasks.SeasonalTasks
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -189,7 +196,6 @@ fun AppScreen(
             onCancel = { showPhoneDialog = false }
         )
     }
-
     if (showBackupDialog) {
         AlertDialog(
             onDismissRequest = { showBackupDialog = false },
@@ -332,6 +338,11 @@ fun AppScreen(
                         onClick = { viewModel.setTab(ScreenTab.MOTYLICE) },
                         text = { Text("Motýlice") }
                     )
+                    Tab(
+                        selected = tab == ScreenTab.MONTHLY,
+                        onClick = { viewModel.setTab(ScreenTab.MONTHLY) },
+                        text = { Text("Úkoly") }
+                    )
                 }
                 Spacer(Modifier.height(8.dp))
                 when (tab) {
@@ -368,8 +379,12 @@ fun AppScreen(
                             onToggle = { viewModel.toggleMotyliceMonitoring(it) },
                             onSireni = { viewModel.confirmSireni(it) },
                             onSetPhone = { showPhoneDialog = true },
-                            onLoadTemps = { viewModel.loadMotyliceTemps(it) }
+                            onLoadTemps = { viewModel.loadMotyliceTemps(it) },
+                            onRename = { s, newName -> viewModel.renameStanoviste(s, newName) }
                         )
+                    }
+                    ScreenTab.MONTHLY -> {
+                        MonthlyTasksScreen()
                     }
                 }
             }
@@ -1061,6 +1076,7 @@ private fun MotyliceList(
     onSireni: (Stanoviste) -> Unit,
     onSetPhone: () -> Unit,
     onLoadTemps: (Stanoviste) -> Unit,
+    onRename: (Stanoviste, String) -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
         if (!phoneSet) {
@@ -1097,7 +1113,8 @@ private fun MotyliceList(
                         loading = loading.contains(s.id),
                         onToggle = { onToggle(s) },
                         onSireni = { onSireni(s) },
-                        onLoadTemps = { onLoadTemps(s) }
+                        onLoadTemps = { onLoadTemps(s) },
+                        onRename = { newName -> onRename(s, newName) }
                     )
                 }
                 item { Spacer(Modifier.height(80.dp)) }
@@ -1120,8 +1137,18 @@ private fun MotyliceCard(
     onToggle: () -> Unit,
     onSireni: () -> Unit,
     onLoadTemps: () -> Unit,
+    onRename: (String) -> Unit,
 ) {
     val hasLocation = s.latitude != null && s.longitude != null
+    var showRenameDialog by remember { mutableStateOf(false) }
+
+    if (showRenameDialog) {
+        RenameStanovisteDialog(
+            current = s.name,
+            onConfirm = { newName -> onRename(newName); showRenameDialog = false },
+            onCancel = { showRenameDialog = false }
+        )
+    }
 
     // Dokud je hlídání zapnuté a máme polohu, teploty si natáhneme (jen jednou,
     // dokud je nemáme a zrovna se nestahují – viewModel sám hlídá duplicitní volání).
@@ -1133,6 +1160,9 @@ private fun MotyliceCard(
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(s.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                IconButton(onClick = { showRenameDialog = true }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Filled.Edit, contentDescription = "Přejmenovat stanoviště")
+                }
                 Switch(
                     checked = s.motyliceMonitoring,
                     onCheckedChange = { onToggle() },
@@ -1734,4 +1764,92 @@ private fun TimelineRowView(
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Měsíční úkoly včelaře (sezónní kalendář)
+// ---------------------------------------------------------------------------
+@Composable
+private fun MonthlyTasksScreen() {
+    val currentMonth = remember { Calendar.getInstance().get(Calendar.MONTH) + 1 }
+    var month by remember { mutableStateOf(currentMonth) }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+        ) {
+            IconButton(onClick = { month = if (month == 1) 12 else month - 1 }) {
+                Icon(Icons.Filled.ChevronLeft, contentDescription = "Předchozí měsíc")
+            }
+            Text(
+                SeasonalTasks.monthNames[month - 1],
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Center
+            )
+            IconButton(onClick = { month = if (month == 12) 1 else month + 1 }) {
+                Icon(Icons.Filled.ChevronRight, contentDescription = "Další měsíc")
+            }
+        }
+        if (month == currentMonth) {
+            Text(
+                "Aktuální měsíc",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(SeasonalTasks.tasks[month].orEmpty()) { task ->
+                Card(Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Filled.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(task, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+            item { Spacer(Modifier.height(80.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun RenameStanovisteDialog(current: String, onConfirm: (String) -> Unit, onCancel: () -> Unit) {
+    var text by remember { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Přejmenovat stanoviště") },
+        text = {
+            Column {
+                Text(
+                    "Nový název se použije pro všechny úly tohoto stanoviště i ve " +
+                        "všech přehledech a záznamech.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text("Název stanoviště") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(text) }, enabled = text.isNotBlank()) { Text("Uložit") }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("Zrušit") }
+        }
+    )
 }
