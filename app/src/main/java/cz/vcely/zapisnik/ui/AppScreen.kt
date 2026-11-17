@@ -2,7 +2,22 @@ package cz.vcely.zapisnik.ui
 
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.FilterChip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -136,6 +151,26 @@ fun AppScreen(
         else viewModel.overviewStanoviste.value = null
     }
     var showVarroa by remember { mutableStateOf(false) }
+    // Smazání záznamu se vždy potvrzuje, ať se nesmaže omylem.
+    var pendingDelete by remember { mutableStateOf<Inspection?>(null) }
+    pendingDelete?.let { rec ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Smazat záznam?") },
+            text = {
+                Text(
+                    "Úl ${hiveLabel(rec.hiveId)}, ${listDateFmt.format(Date(rec.timestamp))}. " +
+                        "Smazání nejde vrátit zpět."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.deleteInspection(rec); pendingDelete = null }) { Text("Ano") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("Ne") }
+            }
+        )
+    }
 
     if (showNamePrompt) {
         NamePromptDialog(onConfirm = { viewModel.setUserName(it) })
@@ -188,7 +223,7 @@ fun AppScreen(
     }
     if (showVarroa) {
         VarroaScreen(
-            onUse = { count, days -> viewModel.applyVarroa(count, days); showVarroa = false },
+            onUse = { count, days, photo -> viewModel.applyVarroa(count, days, photo); showVarroa = false },
             onClose = { showVarroa = false }
         )
     }
@@ -310,7 +345,7 @@ fun AppScreen(
                         }
                         val list = hiveFilter?.let { h -> inspections.filter { it.hiveId == h } }
                             ?: inspections
-                        InspectionList(list, onDelete = { viewModel.deleteInspection(it) }, onEdit = { viewModel.startEditing(it) })
+                        InspectionList(list, onDelete = { pendingDelete = it }, onEdit = { viewModel.startEditing(it) })
                     }
                     ScreenTab.OVERVIEW -> {
                         OverviewByStanovisteScreen(
@@ -321,7 +356,7 @@ fun AppScreen(
                             onSelectHive = { viewModel.overviewHive.value = it },
                             onBulkDictate = onBulkDictate,
                             onEdit = { viewModel.startEditing(it) },
-                            onDelete = { viewModel.deleteInspection(it) }
+                            onDelete = { pendingDelete = it }
                         )
                     }
                     ScreenTab.MOTYLICE -> {
@@ -481,6 +516,10 @@ private fun InspectionCard(r: Inspection, onDelete: () -> Unit, onEdit: () -> Un
                 PhotoThumb(it, 64.dp)
                 Spacer(Modifier.width(12.dp))
             }
+            r.varroaPhotoPath?.takeIf { it.isNotBlank() }?.let {
+                PhotoThumb(it, 64.dp)
+                Spacer(Modifier.width(12.dp))
+            }
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -600,6 +639,8 @@ private fun OverviewByStanovisteScreen(
     onDelete: (Inspection) -> Unit,
 ) {
     val sel = selectedStanoviste
+    // Přepínač "Úly / Časová osa" na úrovni stanoviště (drží se i po otevření úlu a návratu zpět).
+    var showTimeline by remember(selectedStanoviste) { mutableStateOf(false) }
     if (sel == null) {
         // 1. úroveň: stanoviště
         val stanovisteOverview = remember(inspections) { buildStanovisteOverview(inspections) }
@@ -620,12 +661,25 @@ private fun OverviewByStanovisteScreen(
                     }
                 }
             }
-            val hivesHere = remember(inspections, sel) {
-                buildOverview(
-                    inspections.filter { (it.stanovisteName?.takeIf { n -> n.isNotBlank() } ?: UNKNOWN_STANOVISTE) == sel }
-                )
+            val recordsHere = remember(inspections, sel) {
+                inspections.filter { (it.stanovisteName?.takeIf { n -> n.isNotBlank() } ?: UNKNOWN_STANOVISTE) == sel }
             }
-            OverviewList(hivesHere, onHiveClick = { onSelectHive(it) })
+            val hivesHere = remember(recordsHere) { buildOverview(recordsHere) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
+                FilterChip(selected = !showTimeline, onClick = { showTimeline = false }, label = { Text("Úly") })
+                FilterChip(selected = showTimeline, onClick = { showTimeline = true }, label = { Text("Časová osa") })
+            }
+            if (showTimeline) {
+                InspectionTimeline(
+                    records = recordsHere,
+                    groupByDay = true,
+                    onHiveClick = { onSelectHive(it) },
+                    onEdit = onEdit,
+                    onDelete = onDelete,
+                )
+            } else {
+                OverviewList(hivesHere, onHiveClick = { onSelectHive(it) })
+            }
         }
     } else {
         // 3. úroveň: všechny záznamy úlu od nejnovějšího (včetně hromadných)
@@ -642,7 +696,13 @@ private fun OverviewByStanovisteScreen(
             val records = remember(inspections, selectedHive) {
                 inspections.filter { it.hiveId == selectedHive }.sortedByDescending { it.timestamp }
             }
-            InspectionList(records, onDelete = onDelete, onEdit = onEdit)
+            InspectionTimeline(
+                records = records,
+                groupByDay = false,
+                onHiveClick = null,
+                onEdit = onEdit,
+                onDelete = onDelete,
+            )
         }
     }
 }
@@ -817,6 +877,10 @@ private fun DraftForm(
                 Spacer(Modifier.width(12.dp))
                 PhotoThumb(draft.photoPath, 56.dp)
             }
+            if (draft.varroaPhotoPath.isNotBlank()) {
+                Spacer(Modifier.width(12.dp))
+                PhotoThumb(draft.varroaPhotoPath, 56.dp)
+            }
         }
         if (draft.latitude.isNotBlank()) {
             Spacer(Modifier.height(4.dp))
@@ -869,17 +933,93 @@ private fun PhotoThumb(path: String, size: Dp) {
             null
         }
     }
+    var showFull by remember { mutableStateOf(false) }
     if (bitmap != null) {
         Image(
             bitmap = bitmap,
-            contentDescription = "Fotka",
-            modifier = Modifier.size(size),
+            contentDescription = "Fotka (klepnutím otevřete)",
+            modifier = Modifier.size(size).clickable { showFull = true },
             contentScale = ContentScale.Crop
         )
     } else {
         Box(Modifier.size(size))
     }
+    if (showFull) PhotoFullDialog(path) { showFull = false }
 }
+
+/** Fotka na celou obrazovku: dvěma prsty se přibližuje a posouvá, "Zavřít" ji zavře. */
+@Composable
+private fun PhotoFullDialog(path: String, onClose: () -> Unit) {
+    val bitmap = remember(path) {
+        try {
+            val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
+            var bmp = BitmapFactory.decodeFile(path, opts)
+            if (bmp != null) {
+                val rotation = try {
+                    when (android.media.ExifInterface(path)
+                        .getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, 1)) {
+                        android.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+                        android.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+                        android.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+                        else -> 0f
+                    }
+                } catch (e: Exception) { 0f }
+                if (rotation != 0f) {
+                    val m = android.graphics.Matrix().apply { postRotate(rotation) }
+                    bmp = android.graphics.Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+                }
+            }
+            bmp?.asImageBitmap()
+        } catch (e: Throwable) {
+            null
+        }
+    }
+    var scale by remember { mutableStateOf(1f) }
+    var offsetX by remember { mutableStateOf(0f) }
+    var offsetY by remember { mutableStateOf(0f) }
+
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxSize(), color = androidx.compose.ui.graphics.Color.Black) {
+            Box(Modifier.fillMaxSize()) {
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap,
+                        contentDescription = "Fotka",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zoomGestures(
+                                onTransform = { zoom, panX, panY ->
+                                    scale = (scale * zoom).coerceIn(1f, 8f)
+                                    if (scale == 1f) { offsetX = 0f; offsetY = 0f }
+                                    else { offsetX += panX; offsetY += panY }
+                                }
+                            )
+                            .graphicsLayer(
+                                scaleX = scale, scaleY = scale,
+                                translationX = offsetX, translationY = offsetY
+                            )
+                    )
+                } else {
+                    Text(
+                        "Fotku se nepodařilo otevřít (soubor chybí).",
+                        color = androidx.compose.ui.graphics.Color.White,
+                        modifier = Modifier.align(Alignment.Center)
+                    )
+                }
+                TextButton(
+                    onClick = onClose,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
+                ) { Text("Zavřít", color = androidx.compose.ui.graphics.Color.White) }
+            }
+        }
+    }
+}
+
+private fun Modifier.zoomGestures(onTransform: (zoom: Float, panX: Float, panY: Float) -> Unit): Modifier =
+    this.pointerInput(Unit) {
+        detectTransformGestures { _, pan, zoom, _ -> onTransform(zoom, pan.x, pan.y) }
+    }
 
 /** 2.0 -> "2", 2.5 -> "2,5" (české desetinné čárky). */
 private fun numFmt(v: Double): String =
@@ -1264,5 +1404,334 @@ private fun DateTimeField(label: String, millis: Long, onChange: (Long) -> Unit)
             },
             dismissButton = { TextButton(onClick = { step = 0 }) { Text("Zrušit") } }
         )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Časová osa úlu a stanoviště
+// Na prvním místě je síla včelstva (obsazené uličky), pak matka a léčení.
+// ---------------------------------------------------------------------------
+private enum class TimelineFilter(val label: String) {
+    ALL("Vše"), STRENGTH("Síla"), QUEEN("Matka"), TREATMENT("Léčení"), PHOTO("S fotkou")
+}
+
+private sealed interface TimelineRow {
+    data class Day(val key: String, val label: String, val hiveCount: Int) : TimelineRow
+    data class Entry(val record: Inspection) : TimelineRow
+}
+
+private val dayFmt = SimpleDateFormat("EEEE d. M. yyyy", Locale("cs"))
+private val dayKeyFmt = SimpleDateFormat("yyyyMMdd", Locale("cs"))
+private val timeFmt = SimpleDateFormat("HH:mm", Locale("cs"))
+private val shortDateFmt = SimpleDateFormat("d. M.", Locale("cs"))
+
+private fun Inspection.matches(f: TimelineFilter): Boolean = when (f) {
+    TimelineFilter.ALL -> true
+    TimelineFilter.STRENGTH -> occupiedSeams != null
+    TimelineFilter.QUEEN -> queenSeen != null || !queenStatus.isNullOrBlank() || eggsSeen != null
+    TimelineFilter.TREATMENT -> !treatment.isNullOrBlank()
+    TimelineFilter.PHOTO -> !photoPath.isNullOrBlank() || !varroaPhotoPath.isNullOrBlank()
+}
+
+/** Změna síly proti předchozímu záznamu stejného úlu, který má sílu vyplněnou (podle id záznamu). */
+private fun strengthDeltas(all: List<Inspection>): Map<Long, Double> {
+    val out = HashMap<Long, Double>()
+    all.groupBy { it.hiveId }.forEach { (_, recs) ->
+        var prev: Double? = null
+        recs.sortedBy { it.timestamp }.forEach { r ->
+            val cur = r.occupiedSeams
+            if (cur != null) {
+                val p = prev
+                if (p != null) out[r.id] = cur - p
+                prev = cur
+            }
+        }
+    }
+    return out
+}
+
+private fun seamsWord(v: Double): String {
+    if (v != v.toLong().toDouble()) return "uličky"
+    return when (v.toLong()) { 1L -> "ulička"; 2L, 3L, 4L -> "uličky"; else -> "uliček" }
+}
+
+private fun relativeAge(ts: Long): String {
+    val days = ((System.currentTimeMillis() - ts) / 86_400_000L).coerceAtLeast(0)
+    return when {
+        days == 0L -> "dnes"
+        days == 1L -> "včera"
+        days < 14 -> "před $days dny"
+        days < 60 -> "před ${days / 7} týdny"
+        else -> "před ${days / 30} měsíci"
+    }
+}
+
+private fun buildTimelineRows(list: List<Inspection>, groupByDay: Boolean): List<TimelineRow> {
+    val sorted = list.sortedByDescending { it.timestamp }
+    if (!groupByDay) return sorted.map { TimelineRow.Entry(it) }
+    val out = ArrayList<TimelineRow>()
+    sorted.groupBy { dayKeyFmt.format(Date(it.timestamp)) }.forEach { (key, recs) ->
+        out.add(
+            TimelineRow.Day(
+                key,
+                dayFmt.format(Date(recs.first().timestamp)).replaceFirstChar { it.uppercase() },
+                recs.map { it.hiveId }.distinct().size
+            )
+        )
+        recs.sortedWith(
+            compareBy<Inspection>(
+                { it.hiveId.toIntOrNull() == null },
+                { it.hiveId.toIntOrNull() ?: 0 },
+                { it.hiveId },
+                { -it.timestamp }
+            )
+        ).forEach { out.add(TimelineRow.Entry(it)) }
+    }
+    return out
+}
+
+@Composable
+private fun TimelineTag(text: String, container: Color, content: Color) {
+    Surface(shape = RoundedCornerShape(6.dp), color = container) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelMedium,
+            color = content,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+        )
+    }
+}
+
+@Composable
+private fun TimelineSummary(records: List<Inspection>) {
+    if (records.isEmpty()) return
+    val withSeams = records.filter { it.occupiedSeams != null }.sortedByDescending { it.timestamp }
+    val withMites = records.filter { it.miteDrop != null }.sortedByDescending { it.timestamp }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp)) {
+            Text(
+                "${records.size} prohlídek  ·  poslední ${relativeAge(records.maxOf { it.timestamp })}",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            withSeams.firstOrNull()?.let { last ->
+                val v = last.occupiedSeams ?: return@let
+                val before = withSeams.getOrNull(1)?.occupiedSeams
+                Text(
+                    "Síla: ${numFmt(v)} ${seamsWord(v)} (${shortDateFmt.format(Date(last.timestamp))})" +
+                        (before?.let { ", dříve ${numFmt(it)}" } ?: ""),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+            withMites.firstOrNull()?.let { last ->
+                val before = withMites.getOrNull(1)?.miteDrop
+                Text(
+                    "Spad roztočů: " + (before?.let { "$it → " } ?: "") + last.miteDrop,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        }
+    }
+    Spacer(Modifier.height(8.dp))
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun InspectionTimeline(
+    records: List<Inspection>,
+    groupByDay: Boolean,
+    onHiveClick: ((String) -> Unit)?,
+    onEdit: (Inspection) -> Unit,
+    onDelete: (Inspection) -> Unit,
+) {
+    var filter by remember { mutableStateOf(TimelineFilter.ALL) }
+    val deltas = remember(records) { strengthDeltas(records) }
+    val rows = remember(records, filter, groupByDay) {
+        buildTimelineRows(records.filter { it.matches(filter) }, groupByDay)
+    }
+    Column(Modifier.fillMaxSize()) {
+        if (!groupByDay) TimelineSummary(records)
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            TimelineFilter.values().forEach { f ->
+                FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f.label) })
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        if (rows.isEmpty()) {
+            Text(
+                if (records.isEmpty()) "Zatím žádné záznamy." else "Žádné záznamy pro tento filtr.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+        } else {
+            LazyColumn {
+                itemsIndexed(
+                    rows,
+                    key = { _, row ->
+                        when (row) {
+                            is TimelineRow.Day -> "d${row.key}"
+                            is TimelineRow.Entry -> "e${row.record.id}"
+                        }
+                    }
+                ) { i, row ->
+                    TimelineRowView(
+                        row = row,
+                        isFirst = i == 0,
+                        isLast = i == rows.lastIndex,
+                        delta = (row as? TimelineRow.Entry)?.let { deltas[it.record.id] },
+                        groupByDay = groupByDay,
+                        onHiveClick = onHiveClick,
+                        onEdit = onEdit,
+                        onDelete = onDelete,
+                    )
+                }
+                item { Spacer(Modifier.height(80.dp)) }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TimelineRowView(
+    row: TimelineRow,
+    isFirst: Boolean,
+    isLast: Boolean,
+    delta: Double?,
+    groupByDay: Boolean,
+    onHiveClick: ((String) -> Unit)?,
+    onEdit: (Inspection) -> Unit,
+    onDelete: (Inspection) -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    val lineColor = cs.outlineVariant
+    val dotColor = when (row) {
+        is TimelineRow.Day -> cs.outline
+        is TimelineRow.Entry -> when {
+            row.record.queenSeen == false -> cs.error
+            !row.record.treatment.isNullOrBlank() -> cs.tertiary
+            else -> cs.primary
+        }
+    }
+    val isDay = row is TimelineRow.Day
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+        Box(
+            Modifier
+                .width(24.dp)
+                .fillMaxHeight()
+                .drawBehind {
+                    val x = size.width / 2
+                    val dotY = 14.dp.toPx()
+                    drawLine(
+                        lineColor,
+                        Offset(x, if (isFirst) dotY else 0f),
+                        Offset(x, if (isLast) dotY else size.height),
+                        strokeWidth = 2.dp.toPx()
+                    )
+                    if (isDay) drawCircle(dotColor, 6.dp.toPx(), Offset(x, dotY), style = Stroke(2.dp.toPx()))
+                    else drawCircle(dotColor, 5.dp.toPx(), Offset(x, dotY))
+                }
+        )
+        Column(Modifier.weight(1f).padding(start = 8.dp, bottom = 12.dp)) {
+            when (row) {
+                is TimelineRow.Day -> {
+                    Text(row.label, style = MaterialTheme.typography.titleSmall)
+                    Text("${row.hiveCount} úlů", style = MaterialTheme.typography.labelSmall)
+                }
+                is TimelineRow.Entry -> {
+                    val r = row.record
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            if (groupByDay) {
+                                Text(
+                                    "Úl ${hiveLabel(r.hiveId)}",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = if (onHiveClick != null) cs.primary else cs.onSurface,
+                                    modifier = if (onHiveClick != null) Modifier.clickable { onHiveClick(r.hiveId) } else Modifier
+                                )
+                                Text(timeFmt.format(Date(r.timestamp)), style = MaterialTheme.typography.labelSmall)
+                            } else {
+                                Text(listDateFmt.format(Date(r.timestamp)), style = MaterialTheme.typography.titleSmall)
+                                Text(relativeAge(r.timestamp), style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                        IconButton(onClick = { onEdit(r) }, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Filled.Edit, contentDescription = "Upravit")
+                        }
+                        IconButton(onClick = { onDelete(r) }, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Smazat")
+                        }
+                    }
+
+                    // Hlavní údaje: síla, matka, léčení
+                    val queenText = buildString {
+                        when (r.queenSeen) {
+                            true -> append("Matka ✓")
+                            false -> append("Matka nenalezena")
+                            null -> if (!r.queenStatus.isNullOrBlank() || r.eggsSeen != null) append("Matka")
+                        }
+                        if (isNotEmpty()) {
+                            r.queenStatus?.takeIf { it.isNotBlank() }?.let { append(": ").append(it) }
+                            if (r.eggsSeen == true) append("  ·  vajíčka ✓")
+                        }
+                    }
+                    val treatment = r.treatment?.takeIf { it.isNotBlank() }
+                    if (r.occupiedSeams != null || queenText.isNotEmpty() || treatment != null) {
+                        Spacer(Modifier.height(4.dp))
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            r.occupiedSeams?.let { v ->
+                                val d = delta?.takeIf { it != 0.0 }
+                                val change = d?.let { " (${if (it > 0) "+" else "−"}${numFmt(kotlin.math.abs(it))})" }.orEmpty()
+                                TimelineTag("Síla: ${numFmt(v)} ${seamsWord(v)}$change", cs.primaryContainer, cs.onPrimaryContainer)
+                            }
+                            if (queenText.isNotEmpty()) {
+                                if (r.queenSeen == false) TimelineTag(queenText, cs.errorContainer, cs.onErrorContainer)
+                                else TimelineTag(queenText, cs.secondaryContainer, cs.onSecondaryContainer)
+                            }
+                            treatment?.let { TimelineTag("Léčení: $it", cs.tertiaryContainer, cs.onTertiaryContainer) }
+                        }
+                    }
+
+                    // Ostatní údaje
+                    val other = buildList {
+                        r.miteDrop?.let { add("spad $it") }
+                        r.broodChamberFrames?.let { add("plodiště ${numFmt(it)}") }
+                        r.cappedBroodFrames?.let { add("zavíč. plod ${numFmt(it)}") }
+                        r.openBroodFrames?.let { add("otev. plod ${numFmt(it)}") }
+                        r.storesFrames?.let { add("zásoby ${numFmt(it)}") }
+                        r.honeyEstimateKg?.let { add("med ${numFmt(it)} kg") }
+                        r.framesRemoved?.let { add("odebráno ${numFmt(it)} rámků") }
+                        r.feeding?.takeIf { it.isNotBlank() }?.let { add("krmení: $it") }
+                        r.temperament?.takeIf { it.isNotBlank() }?.let { add(it) }
+                        r.diseaseNotes?.takeIf { it.isNotBlank() }?.let { add("nemoci: $it") }
+                        r.interventions?.takeIf { it.isNotBlank() }?.let { add("zásah: $it") }
+                        r.tasksNextTime?.takeIf { it.isNotBlank() }?.let { add("do příště: $it") }
+                    }
+                    if (other.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(other.joinToString("  ·  "), style = MaterialTheme.typography.bodySmall)
+                    }
+                    r.note?.takeIf { it.isNotBlank() }?.let {
+                        Spacer(Modifier.height(2.dp))
+                        Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    }
+
+                    val photos = listOfNotNull(
+                        r.photoPath?.takeIf { it.isNotBlank() },
+                        r.varroaPhotoPath?.takeIf { it.isNotBlank() }
+                    )
+                    if (photos.isNotEmpty()) {
+                        Spacer(Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            photos.forEach { PhotoThumb(it, 56.dp) }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

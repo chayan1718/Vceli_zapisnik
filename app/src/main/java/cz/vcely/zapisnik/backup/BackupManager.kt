@@ -40,6 +40,8 @@ object BackupManager {
         for (i in inspections) {
             val f = i.photoPath?.let { File(it) }
             if (f != null && f.isFile) photoFiles[f.name] = f
+            val v = i.varroaPhotoPath?.let { File(it) }
+            if (v != null && v.isFile) photoFiles[v.name] = v
         }
 
         val root = JSONObject()
@@ -138,6 +140,7 @@ object BackupManager {
             .put("honeyEstimateKg", honeyEstimateKg ?: n).put("framesRemoved", framesRemoved ?: n)
             .put("tasksNextTime", tasksNextTime ?: n)
             .put("photoFile", photoPath?.let { File(it).name } ?: n)
+            .put("varroaPhotoFile", varroaPhotoPath?.let { File(it).name } ?: n)
             .put("latitude", latitude ?: n).put("longitude", longitude ?: n)
             .put("rawTranscript", rawTranscript ?: n).put("note", note ?: n)
     }
@@ -155,6 +158,7 @@ object BackupManager {
         honeyEstimateKg = dbl("honeyEstimateKg"), framesRemoved = dbl("framesRemoved"),
         tasksNextTime = str("tasksNextTime"),
         photoPath = str("photoFile")?.let { File(photoDir, it).absolutePath },
+        varroaPhotoPath = str("varroaPhotoFile")?.let { File(photoDir, it).absolutePath },
         latitude = dbl("latitude"), longitude = dbl("longitude"),
         rawTranscript = str("rawTranscript"), note = str("note"),
     )

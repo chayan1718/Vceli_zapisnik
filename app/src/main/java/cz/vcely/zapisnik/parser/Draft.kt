@@ -31,6 +31,7 @@ data class Draft(
     var tasksNextTime: String = "",
     var note: String = "",
     var photoPath: String = "",
+    var varroaPhotoPath: String = "",   // fotka podložky s kleštíky
     var latitude: String = "",
     var longitude: String = "",
     var rawTranscript: String = "",
@@ -67,6 +68,7 @@ data class Draft(
             framesRemoved = d(framesRemoved),
             tasksNextTime = t(tasksNextTime),
             photoPath = t(photoPath),
+            varroaPhotoPath = t(varroaPhotoPath),
             latitude = d(latitude),
             longitude = d(longitude),
             note = t(note),
@@ -106,6 +108,7 @@ data class Draft(
                 tasksNextTime = i.tasksNextTime.orEmpty(),
                 note = i.note.orEmpty(),
                 photoPath = i.photoPath.orEmpty(),
+                varroaPhotoPath = i.varroaPhotoPath.orEmpty(),
                 latitude = s(i.latitude),
                 longitude = s(i.longitude),
                 rawTranscript = i.rawTranscript.orEmpty(),

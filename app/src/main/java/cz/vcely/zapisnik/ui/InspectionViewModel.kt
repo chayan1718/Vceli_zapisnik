@@ -318,7 +318,8 @@ class InspectionViewModel(app: Application) : AndroidViewModel(app) {
         // Co se nemá z přepisu měnit: úl, stanoviště, datum, fotka, poloha a sám přepis.
         return parsed.copy(
             hiveId = d.hiveId, stanovisteName = d.stanovisteName, timestamp = d.timestamp,
-            photoPath = d.photoPath, latitude = d.latitude, longitude = d.longitude,
+            photoPath = d.photoPath, varroaPhotoPath = d.varroaPhotoPath,
+            latitude = d.latitude, longitude = d.longitude,
             rawTranscript = d.rawTranscript,
         )
     }
@@ -458,7 +459,7 @@ class InspectionViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // --- Kleštíci z fotky podložky: výsledek jde do rozpracovaného (nebo nového) záznamu ---
-    fun applyVarroa(count: Int, days: Int?) {
+    fun applyVarroa(count: Int, days: Int?, photoPath: String? = null) {
         val line = buildString {
             append("Kleštíci z fotky podložky: ").append(count)
             if (days != null && days > 0) {
@@ -471,14 +472,16 @@ class InspectionViewModel(app: Application) : AndroidViewModel(app) {
         if (cur != null) {
             draft.value = cur.copy(
                 miteDrop = count.toString(),
-                note = listOf(cur.note, line).filter { it.isNotBlank() }.joinToString("\n")
+                note = listOf(cur.note, line).filter { it.isNotBlank() }.joinToString("\n"),
+                varroaPhotoPath = photoPath ?: cur.varroaPhotoPath
             )
         } else {
             draft.value = Draft(
                 hiveId = lastHive.value,
                 stanovisteName = currentStanovisteName.value.orEmpty(),
                 miteDrop = count.toString(),
-                note = line
+                note = line,
+                varroaPhotoPath = photoPath.orEmpty()
             )
         }
     }

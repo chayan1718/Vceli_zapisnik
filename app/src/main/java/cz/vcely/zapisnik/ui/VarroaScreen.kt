@@ -61,12 +61,26 @@ import kotlin.math.hypot
 import kotlin.math.max
 
 /**
- * Počítání kleštíků z fotky podložky. Nic neukládá sám: až po "Přidat do záznamu"
- * předá počet (a počet dní) dál a appka ho vloží do rozpracovaného záznamu.
+ * Uloží fotku podložky do trvalého úložiště appky (složka photos), odkud ji bere
+ * i záloha. Vrací cestu k souboru, nebo null, když se uložení nepovede.
+ */
+private fun savePhoto(context: android.content.Context, bmp: Bitmap): String? = try {
+    val dir = File(context.filesDir, "photos").apply { mkdirs() }
+    val file = File(dir, "varroa_${System.currentTimeMillis()}.jpg")
+    file.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+    file.absolutePath
+} catch (e: Exception) {
+    null
+}
+
+/**
+ * Počítání kleštíků z fotky podložky. Až po "Přidat do záznamu" uloží fotku
+ * a předá počet (a počet dní) i cestu k fotce dál; appka je vloží do
+ * rozpracovaného záznamu, takže fotka je součástí dat a záloh.
  */
 @Composable
 fun VarroaScreen(
-    onUse: (count: Int, days: Int?) -> Unit,
+    onUse: (count: Int, days: Int?, photoPath: String?) -> Unit,
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -236,7 +250,17 @@ fun VarroaScreen(
                         )
                         Spacer(Modifier.height(8.dp))
                         Button(
-                            onClick = { onUse(total(), daysText.toIntOrNull()?.takeIf { it > 0 }) },
+                            enabled = !busy,
+                            onClick = {
+                                val count = total()
+                                val days = daysText.toIntOrNull()?.takeIf { it > 0 }
+                                busy = true
+                                scope.launch {
+                                    val path = withContext(Dispatchers.IO) { savePhoto(context, bmp) }
+                                    busy = false
+                                    onUse(count, days, path)
+                                }
+                            },
                             modifier = Modifier.fillMaxWidth()
                         ) { Text("Přidat do záznamu") }
                     }

@@ -21,6 +21,21 @@ Než se záznam uloží, uvidíte **náhled** a můžete cokoli opravit.
 
 ---
 
+## Verze 2.4
+
+- **Fotka podložky se ukládá do záznamu** – po „Přidat do záznamu" se fotka,
+  ze které se počítali kleštíci (vyfocená i z galerie), uloží v appce
+  a připojí k záznamu spolu s počtem.
+- **Fotky jsou součástí zálohy** – fotka podložky se zálohuje a při obnově
+  vrací společně s ostatními daty. Starší zálohy fungují dál.
+- **Otevření fotky na celou obrazovku** – klepnutím na náhled v záznamu se
+  fotka otevře; dvěma prsty se přibližuje a posouvá (hodí se ke kontrole
+  označených kleštíků).
+- **Databáze verze 6** – přibyl sloupec s fotkou podložky; při aktualizaci
+  z 2.3 se stávající záznamy zachovají (migrace 5 → 6).
+
+---
+
 ## Verze 2.3
 
 - **Záloha a obnova dat** – ikona zálohy v horní liště uloží všechny úly,
@@ -115,7 +130,8 @@ plodu, zvápenatění, nosema), spad roztočů.
 
 **Med a odběry** — odhad/výnos medu v kg, odebrané rámky, úkoly do příště.
 
-**Fotka a poloha** — fotka pořízená u úlu a GPS souřadnice stanoviště.
+**Fotka a poloha** — fotka pořízená u úlu, fotka podložky s kleštíky a GPS
+souřadnice stanoviště.
 
 Ke každému záznamu se ukládá i **původní přepis řeči** a **volná poznámka**.
 

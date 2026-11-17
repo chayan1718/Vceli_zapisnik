@@ -45,6 +45,7 @@ data class Inspection(
 
     // --- Fotka a poloha ---
     val photoPath: String? = null,           // cesta k pořízené fotce
+    val varroaPhotoPath: String? = null,     // cesta k fotce podložky, ze které se počítali kleštíci
     val latitude: Double? = null,            // GPS šířka
     val longitude: Double? = null,           // GPS délka
 
